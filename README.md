@@ -18,7 +18,7 @@ The current deployed version stores daily entries, plans, tasks, and execution n
 - Data persists on the same browser profile and origin.
 - Data does **not** automatically synchronize to another browser, computer, or phone.
 - Clearing this browser's site data can erase the diary. Use **돌아보기 → 데이터 내보내기** to create a JSON backup and keep it somewhere safe.
-- The GitHub repository is private, but the public Vercel website URL is not made private merely by the repository being private. This frontend does not contain diary data, but anyone with the URL can open the app and use their own browser storage.
+- Access protection is configured separately from GitHub visibility. This project's Vercel SSO protection is enabled for its `.vercel.app` aliases, so access depends on Vercel authentication. Do not assume a private GitHub repository automatically makes a deployed site private; re-check Vercel protection settings before changing or sharing deployment URLs. This frontend does not contain diary data.
 
 Login, server-side storage, and device-to-device sync are not configured yet. To make this a signed-in, single-owner cloud diary, connect a **separate Supabase project**, enable Auth, and apply per-user Row Level Security policies before storing any personal records in the database. Do not reuse credentials from another project and never put service-role secrets in browser code.
 
