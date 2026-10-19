@@ -1,6 +1,6 @@
 # Mellow Diary
 
-A soft, colorful, responsive personal diary for plans, tasks, and real-life execution notes.
+A soft, colorful, responsive personal diary with free-form daily journal entries, plans, tasks, and real-life execution notes.
 
 ## Deploy
 
@@ -13,7 +13,7 @@ This is a static single-page application. Vercel can serve `index.html` directly
 
 ## Current storage model — important
 
-The current deployed version uses the browser's `localStorage` and does not send diary content to a server. It can be used immediately in one browser profile without installing or configuring a database.
+The current deployed version stores daily entries, plans, tasks, and execution notes in the browser's `localStorage`; it does not send diary content to a server. Existing data is preserved when the new journal-entry collection is first added. It can be used immediately in one browser profile without installing or configuring a database.
 
 - Data persists on the same browser profile and origin.
 - Data does **not** automatically synchronize to another browser, computer, or phone.
@@ -24,6 +24,8 @@ Login, server-side storage, and device-to-device sync are not configured yet. To
 
 ## Features
 
+- Free-form daily diary entries with date, optional mood label, tags, and create/edit/delete actions
+- Recent journal entries surfaced on the dashboard
 - General-purpose plans with date range, success criteria, estimated minutes and version history
 - Tasks linked to a plan or independent, with status, due date, priority, tags and estimate
 - Search and filters for task text, status, priority and tag
