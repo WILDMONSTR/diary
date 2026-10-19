@@ -1,5 +1,14 @@
 # Behavior and limits
 
+## Daily journal entries
+
+- Entries have a calendar date, title, free-form body, optional mood label, and comma-separated tags.
+- Entries are sorted by date, with the most recently updated entry first for the same date.
+- Create, edit, and delete actions operate on the browser-local data collection.
+- The dashboard shows recent entries and links to the full journal.
+- The journal collection is part of JSON export/import. Older backups without an `entries` array are accepted and normalized to an empty journal collection.
+- Entry text is escaped before it is placed into the page, and line breaks are preserved when rendered.
+
 ## Plans
 
 Each plan stores its latest fields and a version number. On a meaningful edit, the previously saved fields are appended to `history` before the latest fields are updated. The original estimated minutes and success criteria are not changed by execution logs.
