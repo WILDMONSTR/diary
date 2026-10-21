@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Each account can read/write only its own single diary document.
+    match /users/{userId}/diary/{documentId} {
+      function isOwner() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+      function validDiaryPayload() {
+        return request.resource.data.keys().hasOnly(['schemaVersion', 'data', 'updatedAt'])
+          && request.resource.data.schemaVersion == 2
+          && request.resource.data.data is map
+          && request.resource.data.data.keys().hasOnly(['plans', 'tasks', 'runs', 'completionEvents', 'entries'])
+          && request.resource.data.data.plans is list
+          && request.resource.data.data.tasks is list
+          && request.resource.data.data.runs is list
+          && request.resource.data.data.completionEvents is list
+          && request.resource.data.data.entries is list
+          && request.resource.data.updatedAt is timestamp;
+      }
+      allow read: if isOwner();
+      allow create, update: if isOwner() && validDiaryPayload();
+      allow delete: if false;
+    }
+  }
+}
