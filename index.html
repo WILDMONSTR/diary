@@ -61,6 +61,16 @@ body{background-color:var(--canvas);background-image:radial-gradient(#ded9ce .65
 .journal-actions{display:flex;justify-content:flex-end;gap:7px;margin-top:13px}
 @media(max-width:720px){.journal-list{grid-template-columns:1fr}}
 .priority-number{display:inline-grid;place-items:center;min-width:25px;height:25px;padding:0 5px;border-radius:8px;background:#f0eeff;color:#6559db;font-size:11px;font-variant-numeric:tabular-nums}.number-picker-wrap{position:relative;min-width:0;width:100%}.number-picker-trigger{display:flex;align-items:center;justify-content:space-between;gap:10px;width:100%;min-height:39px;padding:9px 12px;border:1px solid #e9e6f1;border-radius:11px;background:#fff;color:var(--ink);font-size:12px;text-align:left}.number-picker-trigger [data-selected-label]{font-weight:800;font-variant-numeric:tabular-nums}.number-picker-trigger:focus-visible{outline:3px solid #c7c1ff;outline-offset:2px}.number-picker-menu{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:40;max-height:155px;overflow-y:auto;overscroll-behavior:contain;padding:4px;background:#fff;border:1px solid #e9e6f1;border-radius:11px;box-shadow:0 12px 30px #33284b24}.number-picker-option{display:flex;align-items:center;justify-content:center;width:100%;height:29px;min-height:29px;padding:4px;border-radius:7px;background:#fff;color:#514c69;font-size:12px;font-variant-numeric:tabular-nums}.number-picker-option:hover,.number-picker-option:focus-visible{background:#f1efff;color:#6559db}.number-picker-option[aria-selected="true"]{background:#eeedff;color:#6559db;font-weight:850}.number-picker-wrap.filter-picker{width:116px;flex:0 0 116px}.number-picker-wrap.filter-picker .number-picker-trigger{min-width:116px}.number-picker-wrap.filter-picker .number-picker-menu{min-width:100%}@media(max-width:720px){.number-picker-wrap.filter-picker{flex:1 1 115px;width:auto}} 
+
+.cloud-sync-panel{margin:0 0 18px;padding:14px 16px;border:1px solid #d9d4f9;border-radius:16px;background:#fbfaff;color:#35324f;font-size:13px;line-height:1.6}
+.cloud-sync-panel strong{display:block;font-size:14px;margin-bottom:4px}
+.cloud-sync-panel p{margin:4px 0}
+.cloud-sync-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.cloud-sync-actions .btn{font-size:12px}
+.cloud-sync-panel .cloud-muted{color:#706d83}
+.cloud-sync-panel .cloud-error{color:#a33b38}
+@media(max-width:720px){.cloud-sync-panel{padding:12px;font-size:12px}}
+
 </style>
 </head>
 <body>
@@ -79,9 +89,10 @@ body{background-color:var(--canvas);background-image:radial-gradient(#ded9ce .65
   <div class="side-bottom">MADE FOR YOUR EVERYDAY · 2026</div>
 </aside>
 <main class="main">
+  <section id="cloudSyncPanel" class="cloud-sync-panel" role="status" aria-live="polite"><strong>중앙 저장소 연결 확인 중…</strong><p>기존 기록은 이 브라우저에 보존됩니다.</p></section>
   <header class="topbar"><div><div class="eyebrow" id="eyebrow">YOUR PERSONAL SPACE</div><h1 class="page-title" id="pageTitle">오늘도, 나답게 ✨</h1><p class="page-sub" id="pageSub">생각을 정리하고 작은 성취를 모아보세요.</p></div><div class="top-actions"><div class="today-pill" id="todayPill"></div><button class="btn btn-primary" data-action="new-task">＋ 새 할 일</button></div></header>
   <section id="appContent"></section>
-  <div class="footer-note">당신의 속도로, 당신의 이야기를 기록해요 ✿</div><p class="privacy-warning">앱 자체 로그인은 아직 없습니다. 현재 기록은 이 브라우저에 저장되어 링크를 아는 사람에게 자동 공개되지는 않지만, 공용 PC에서는 다른 사용자가 볼 수 있습니다. 남이 봐도 괜찮은 내용만 넣고 백업을 안전하게 보관하세요.</p>
+  <div class="footer-note">당신의 속도로, 당신의 이야기를 기록해요 ✿</div><p class="privacy-warning">현재 과제용 버전은 Vercel 중앙 저장소와 동기화됩니다. 로그인 없이 누구나 기록을 읽고 수정할 수 있으므로 실제 개인정보나 민감한 내용을 넣지 마세요. 중요한 기록은 JSON 백업으로 보관하세요.</p>
 </main>
 </div>
 <div id="modalRoot"></div><div id="toastRoot" aria-live="polite"></div>
@@ -94,12 +105,199 @@ const labels={home:["YOUR PERSONAL SPACE","오늘의 페이지를 펼쳐요 ✎"
 const blank=()=>({plans:[],tasks:[],runs:[],completionEvents:[],entries:[]});
 let data=loadData(),page="home",query="",statusFilter="all",priorityFilter="all",tagFilter="",sortMode="due",priorityOrder="asc",toastTimer;
 const lastCompletionClick=new Map();
+let cloudState="checking",cloudUpdatedAt=null,cloudSaveTimer=null,cloudSaveInFlight=false,cloudPendingRemote=null,cloudStatusMessage="",lastLocalEditAt=0;
 function normalizeData(input){const d=input&&typeof input==="object"?input:{};const rawEvents=Array.isArray(d.completionEvents)?d.completionEvents:[];const completionEvents=rawEvents.filter(e=>e&&typeof e==="object").map(e=>({id:String(e.id||id()),taskId:String(e.taskId||""),taskTitleSnapshot:String(e.taskTitleSnapshot||"완료한 할 일"),cycleKey:String(e.cycleKey||"1"),at:validDateString(e.at)?String(e.at):nowISO()}));const cycleByTask={};completionEvents.forEach(e=>{const n=Number(e.cycleKey)||0;cycleByTask[e.taskId]=Math.max(cycleByTask[e.taskId]||0,n)});const plans=(Array.isArray(d.plans)?d.plans:[]).filter(p=>p&&typeof p==="object").map(p=>({...p,id:String(p.id||id()),title:String(p.title||"제목 없는 계획"),category:String(p.category||"기타"),description:String(p.description||""),startDate:String(p.startDate||""),endDate:String(p.endDate||""),successCriteria:String(p.successCriteria||""),estimatedMinutes:safeMinutes(p.estimatedMinutes),status:["active","paused","done"].includes(p.status)?p.status:"active",versionNo:Math.max(1,Number(p.versionNo)||1),history:Array.isArray(p.history)?p.history.filter(h=>h&&typeof h==="object").map(h=>({...h,title:String(h.title||"제목 없는 계획"),category:String(h.category||"기타"),description:String(h.description||""),startDate:String(h.startDate||""),endDate:String(h.endDate||""),successCriteria:String(h.successCriteria||""),estimatedMinutes:safeMinutes(h.estimatedMinutes),version:Math.max(1,Number(h.version)||1),savedAt:validDateString(h.savedAt)?String(h.savedAt):nowISO()})):[],createdAt:validDateString(p.createdAt)?String(p.createdAt):nowISO(),updatedAt:validDateString(p.updatedAt)?String(p.updatedAt):(validDateString(p.createdAt)?String(p.createdAt):nowISO())}));const tasks=(Array.isArray(d.tasks)?d.tasks:[]).filter(t=>t&&typeof t==="object").map(t=>({...t,id:String(t.id||id()),title:String(t.title||"제목 없는 할 일"),planId:typeof t.planId==="string"&&t.planId?t.planId:null,status:["todo","inprogress","done"].includes(t.status)?t.status:"todo",dueDate:typeof t.dueDate==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(t.dueDate)?t.dueDate:"",priority:normalizePriority(t.priority),estimatedMinutes:safeMinutes(t.estimatedMinutes),tags:Array.isArray(t.tags)?t.tags.map(x=>String(x).trim()).filter(Boolean):typeof t.tags==="string"?t.tags.split(",").map(x=>x.trim()).filter(Boolean):[],description:String(t.description||""),createdAt:validDateString(t.createdAt)?String(t.createdAt):nowISO(),updatedAt:validDateString(t.updatedAt)?String(t.updatedAt):(validDateString(t.createdAt)?String(t.createdAt):nowISO()),completedAt:validDateString(t.completedAt)?String(t.completedAt):null,completionCycle:Math.max(Number(t.completionCycle)||0,cycleByTask[String(t.id||"")]||0)}));const runs=(Array.isArray(d.runs)?d.runs:[]).filter(r=>r&&typeof r==="object").map(r=>({...r,id:String(r.id||id()),taskId:typeof r.taskId==="string"&&r.taskId?r.taskId:null,planId:typeof r.planId==="string"&&r.planId?r.planId:null,taskTitleSnapshot:String(r.taskTitleSnapshot||""),title:String(r.title||r.taskTitleSnapshot||"실행 기록"),startedAt:validDateString(r.startedAt)?String(r.startedAt):nowISO(),endedAt:validDateString(r.endedAt)?String(r.endedAt):null,durationMinutes:safeMinutes(r.durationMinutes),blocker:String(r.blocker||""),note:String(r.note||""),createdAt:validDateString(r.createdAt)?String(r.createdAt):nowISO()}));const entries=(Array.isArray(d.entries)?d.entries:[]).filter(e=>e&&typeof e==="object").map(e=>({id:String(e.id||id()),date:validDay(e.date)?String(e.date):dateInputNow().slice(0,10),title:String(e.title||"오늘의 기록"),content:String(e.content||""),mood:["🙂 좋았어요","😐 평범했어요","😮‍💨 지쳤어요","🌱 성장했어요","💭 생각이 많았어요"].includes(e.mood)?e.mood:"😐 평범했어요",tags:Array.isArray(e.tags)?e.tags.map(x=>String(x).trim()).filter(Boolean):typeof e.tags==="string"?e.tags.split(",").map(x=>x.trim()).filter(Boolean):[],createdAt:validDateString(e.createdAt)?String(e.createdAt):nowISO(),updatedAt:validDateString(e.updatedAt)?String(e.updatedAt):(validDateString(e.createdAt)?String(e.createdAt):nowISO())}));return{plans:plans,tasks:tasks,runs:runs,completionEvents:completionEvents,entries:entries}}
 function safeMinutes(value){const n=Number(value);return Number.isFinite(n)?Math.max(0,Math.round(n)):0}
 function validDateString(value){return typeof value==="string"&&value.trim()!==""&&!Number.isNaN(new Date(value).getTime())}
 function validDay(value){if(typeof value!=="string"||!/^\\d{4}-\\d{2}-\\d{2}$/.test(value))return false;const p=value.split("-").map(Number),d=new Date(p[0],p[1]-1,p[2]);return d.getFullYear()===p[0]&&d.getMonth()===p[1]-1&&d.getDate()===p[2]}
 function loadData(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return blank();return normalizeData(JSON.parse(raw))}catch(e){return blank()}}
-function save(){try{localStorage.setItem(STORE_KEY,JSON.stringify(data));return true}catch(e){showToast("저장 공간이 부족해요. 데이터 내보내기로 백업해 주세요.");return false}}
+function save(){
+  try{
+    localStorage.setItem(STORE_KEY,JSON.stringify(data));
+    lastLocalEditAt=Date.now();
+    if(cloudState==="ready")scheduleCloudWrite();
+    updateCloudPanel();
+    return true;
+  }catch(e){
+    showToast("브라우저 저장 공간이 부족해요. 데이터 내보내기로 백업해 주세요.");
+    return false;
+  }
+}
+function hasRecords(value){
+  return ["plans","tasks","runs","completionEvents","entries"].some(key=>Array.isArray(value&&value[key])&&value[key].length>0);
+}
+function recordsSummary(value){
+  const d=value||{};
+  return ["plans","tasks","runs","completionEvents","entries"].reduce((sum,key)=>sum+(Array.isArray(d[key])?d[key].length:0),0);
+}
+function comparableData(value){return JSON.stringify(normalizeData(value))}
+function updateCloudPanel(){
+  const panel=document.getElementById("cloudSyncPanel");
+  if(!panel)return;
+  const actions=(items)=>'<div class="cloud-sync-actions">'+items.join("")+'</div>';
+  const button=(action,label,klass)=>'<button type="button" class="btn '+(klass||"btn-white")+'" data-action="'+action+'">'+label+'</button>';
+  if(cloudState==="checking"){
+    panel.innerHTML='<strong>중앙 다이어리 연결 확인 중…</strong><p>이 컴퓨터의 기존 기록은 아직 변경하지 않았어요.</p>';
+  }else if(cloudState==="empty"){
+    const count=recordsSummary(data);
+    panel.innerHTML='<strong>중앙 저장소가 아직 비어 있어요.</strong><p>'+(count>0?'이 컴퓨터에 계획·할 일·기록 '+count+'개가 있습니다. 기존 기록이 있는 A 컴퓨터에서 한 번만 업로드하세요.':'기존 기록이 있는 A 컴퓨터에서 먼저 중앙 저장소를 초기화해야 합니다.')+'</p><p class="cloud-muted">로그인 없이 공개되는 과제용 저장소입니다. 누구나 기록을 읽고 수정할 수 있으니 민감한 정보는 넣지 마세요.</p>'+(count>0?actions([button("cloud-upload-local","이 컴퓨터의 기존 기록을 중앙에 처음 업로드","btn-primary")]):"");
+  }else if(cloudState==="ready"){
+    panel.innerHTML='<strong>중앙 동기화 연결됨 ✓</strong><p>이 컴퓨터의 저장 내용은 중앙 저장소에 반영됩니다. 다른 컴퓨터에서 최근 기록을 보려면 “중앙 기록 새로고침”을 누르세요.</p><p class="cloud-muted">로그인 없이 누구나 조회·수정할 수 있습니다. 여러 사람이 동시에 수정하면 마지막 저장이 먼저 저장된 변경을 덮어쓸 수 있어요.</p>'+(cloudSaveInFlight||cloudSaveTimer?'<p>중앙 저장 중…</p>':(cloudStatusMessage?'<p class="cloud-error">'+esc(cloudStatusMessage)+'</p>':''))+actions([button("cloud-pull","중앙 기록 새로고침","btn-white")].concat(cloudStatusMessage?[button("cloud-retry-save","현재 기록 다시 저장","btn-primary")]:[]));
+  }else if(cloudState==="conflict"){
+    panel.innerHTML='<strong>이 컴퓨터와 중앙 기록이 서로 달라요.</strong><p>기록을 자동으로 덮어쓰지 않았습니다. 먼저 로컬 기록을 백업한 뒤 어느 쪽을 사용할지 선택하세요.</p><p class="cloud-muted">“중앙 기록 사용”은 이 컴퓨터의 기록을 JSON 파일로 백업하고 중앙 기록을 불러옵니다. “이 컴퓨터 기록 업로드”는 중앙의 모든 기록을 덮어씁니다.</p>'+actions([button("cloud-use-remote","중앙 기록 사용","btn-white"),button("cloud-overwrite-remote","이 컴퓨터 기록으로 중앙 덮어쓰기","btn-primary")]);
+  }else{
+    panel.innerHTML='<strong class="cloud-error">중앙 저장소에 연결하지 못했어요.</strong><p>'+esc(cloudStatusMessage||"Blob 연결 또는 배포 설정을 확인해 주세요.")+'</p><p class="cloud-muted">이 컴퓨터의 기록은 localStorage에 남아 있습니다. 연결이 확인될 때까지 페이지 데이터를 지우지 마세요.</p>'+actions([button("cloud-retry","연결 다시 확인","btn-primary"),button("export-data","JSON 백업 다운로드","btn-white")]);
+  }
+}
+async function requestSharedDiary(){
+  const response=await fetch("/api/diary?ts="+Date.now(),{method:"GET",cache:"no-store",headers:{"Accept":"application/json"}});
+  const result=await response.json().catch(()=>({}));
+  if(!response.ok||!result.ok)throw new Error(result.error||("HTTP "+response.status));
+  return result;
+}
+async function writeSharedDiary(candidate){
+  const response=await fetch("/api/diary",{method:"PUT",cache:"no-store",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({data:candidate})});
+  const result=await response.json().catch(()=>({}));
+  if(!response.ok||!result.ok)throw new Error(result.error||("HTTP "+response.status));
+  return result;
+}
+function applySharedDiary(result){
+  data=normalizeData(result.data);
+  localStorage.setItem(STORE_KEY,JSON.stringify(data));
+  cloudUpdatedAt=result.updatedAt||null;
+  cloudState="ready";
+  cloudPendingRemote=null;
+  cloudStatusMessage="";
+  render();
+  updateCloudPanel();
+}
+async function initializeCloudSync(){
+  cloudState="checking";
+  cloudStatusMessage="";
+  updateCloudPanel();
+  const editAtStart=lastLocalEditAt;
+  try{
+    const result=await requestSharedDiary();
+    if(!result.exists){
+      cloudState="empty";
+      updateCloudPanel();
+      return;
+    }
+    if(lastLocalEditAt!==editAtStart){
+      cloudState="conflict";
+      cloudPendingRemote=result;
+      updateCloudPanel();
+      return;
+    }
+    if(hasRecords(data)&&comparableData(data)!==comparableData(result.data)){
+      cloudState="conflict";
+      cloudPendingRemote=result;
+      updateCloudPanel();
+      return;
+    }
+    applySharedDiary(result);
+  }catch(error){
+    cloudState="error";
+    cloudStatusMessage=error&&error.message?error.message:"요청 실패";
+    updateCloudPanel();
+  }
+}
+function scheduleCloudWrite(delay){
+  if(cloudState!=="ready")return;
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer=setTimeout(async()=>{
+    cloudSaveTimer=null;
+    if(cloudSaveInFlight){scheduleCloudWrite(350);return}
+    cloudSaveInFlight=true;
+    updateCloudPanel();
+    const snapshot=JSON.parse(JSON.stringify(data));
+    try{
+      const result=await writeSharedDiary(snapshot);
+      cloudUpdatedAt=result.updatedAt||cloudUpdatedAt;
+      cloudStatusMessage="";
+    }catch(error){
+      cloudStatusMessage=error&&error.message?error.message:"저장 요청 실패";
+    }finally{
+      cloudSaveInFlight=false;
+      updateCloudPanel();
+      if(!cloudStatusMessage&&JSON.stringify(data)!==JSON.stringify(snapshot))scheduleCloudWrite(400);
+    }
+  },typeof delay==="number"?delay:900);
+  updateCloudPanel();
+}
+async function uploadLocalDiaryToCloud(overwrite){
+  if(cloudState!=="empty"&&!overwrite)return;
+  if(!overwrite&&!hasRecords(data)){showToast("업로드할 기존 기록이 없습니다.");return}
+  const prompt=overwrite
+    ?"중앙 저장소의 전체 기록을 이 컴퓨터의 기록으로 교체합니다. 중앙의 다른 기록은 사라집니다. 계속할까요?"
+    :"중앙 저장소는 비어 있습니다. 이 컴퓨터의 기존 기록을 공유 다이어리의 최초 기록으로 업로드할까요? 업로드 뒤에는 사이트 방문자 누구나 이 기록을 읽고 수정할 수 있습니다.";
+  if(!confirm(prompt))return;
+  try{
+    const result=await writeSharedDiary(data);
+    cloudUpdatedAt=result.updatedAt||null;
+    cloudState="ready";
+    cloudPendingRemote=null;
+    cloudStatusMessage="";
+    updateCloudPanel();
+    showToast("기록을 중앙 저장소에 업로드했습니다.");
+  }catch(error){
+    cloudStatusMessage=error&&error.message?error.message:"업로드 실패";
+    updateCloudPanel();
+    showToast("중앙 업로드에 실패했어요. JSON 백업을 유지해 주세요.");
+  }
+}
+async function pullSharedDiary(){
+  if(cloudSaveTimer||cloudSaveInFlight){
+    showToast("아직 중앙 저장 중이에요. 잠시 후 다시 눌러 주세요.");
+    return;
+  }
+  try{
+    const result=await requestSharedDiary();
+    if(!result.exists){
+      cloudState="empty";
+      updateCloudPanel();
+      showToast("중앙 저장소가 아직 비어 있습니다.");
+      return;
+    }
+    if(hasRecords(data)&&comparableData(data)!==comparableData(result.data)){
+      if(!confirm("중앙 기록과 이 컴퓨터의 기록이 다릅니다. 현재 기록을 JSON 백업으로 내려받은 뒤 중앙 기록을 불러올까요?"))return;
+      exportData();
+    }
+    applySharedDiary(result);
+    showToast("중앙 기록을 불러왔어요.");
+  }catch(error){
+    cloudStatusMessage=error&&error.message?error.message:"불러오기 실패";
+    updateCloudPanel();
+    showToast("중앙 기록을 불러오지 못했어요.");
+  }
+}
+async function usePendingCloudDiary(){
+  if(!cloudPendingRemote)return;
+  if(hasRecords(data)){
+    if(!confirm("현재 컴퓨터의 기록을 JSON 백업으로 내려받고 중앙 기록으로 바꿀까요?"))return;
+    exportData();
+  }
+  applySharedDiary(cloudPendingRemote);
+  showToast("중앙 기록을 불러왔어요.");
+}
+async function overwriteCloudWithLocal(){
+  if(!cloudPendingRemote)return;
+  const prompt="현재 컴퓨터의 모든 기록으로 중앙 다이어리 전체를 교체합니다. 다른 컴퓨터에서 작성된 중앙 기록은 사라집니다. 계속할까요?";
+  if(!confirm(prompt))return;
+  try{
+    const result=await writeSharedDiary(data);
+    cloudUpdatedAt=result.updatedAt||null;
+    cloudState="ready";
+    cloudPendingRemote=null;
+    cloudStatusMessage="";
+    updateCloudPanel();
+    showToast("이 컴퓨터의 기록을 중앙에 업로드했습니다.");
+  }catch(error){
+    cloudStatusMessage=error&&error.message?error.message:"업로드 실패";
+    updateCloudPanel();
+    showToast("업로드에 실패했습니다. 기존 기록은 유지됩니다.");
+  }
+}
 function id(){return (typeof crypto!=="undefined"&&crypto.randomUUID)?crypto.randomUUID():("id-"+Date.now()+"-"+Math.random().toString(36).slice(2,10))}
 function nowISO(){return new Date().toISOString()}
 function dateInputNow(){const d=new Date();d.setMinutes(d.getMinutes()-d.getTimezoneOffset());return d.toISOString().slice(0,16)}
@@ -133,7 +331,7 @@ function filteredTasks(){let arr=data.tasks.slice();if(query.trim()){const q=que
 function priorityPicker(value,mode){const filterMode=mode==="filter",current=filterMode?(value==="all"?"all":String(normalizePriority(value))):String(normalizePriority(value));const shown=filterMode&&current==="all"?"전체":current;const action=filterMode?"set-priority-filter":"set-priority-value";const options=Array.from({length:20},(_,i)=>i+1).map(n=>'<button type="button" class="number-picker-option" role="option" aria-selected="'+(current===String(n)?"true":"false")+'" data-action="'+action+'" data-value="'+n+'">'+n+'</button>').join("");const allOption=filterMode?'<button type="button" class="number-picker-option" role="option" aria-selected="'+(current==="all"?"true":"false")+'" data-action="set-priority-filter" data-value="all">전체</button>':"";return (filterMode?'<div class="number-picker-wrap filter-picker" data-priority-picker="filter">':'<div class="form-field"><label>우선순위 (1이 가장 높음)</label><div class="number-picker-wrap" data-priority-picker="form">')+(filterMode?"":'<input type="hidden" name="priority" value="'+current+'">')+'<button type="button" class="number-picker-trigger" data-action="toggle-priority-picker" data-picker="'+mode+'" aria-expanded="false" aria-label="'+(filterMode?"우선순위 번호 필터":"우선순위 숫자 선택")+'"><span data-selected-label>'+shown+'</span><span aria-hidden="true">▾</span></button><div class="number-picker-menu hide" data-priority-menu="'+mode+'" role="listbox" aria-label="우선순위 번호 1부터 20">'+options+allOption+'</div></div>'+(filterMode?"":"</div>")}
 function renderTasks(){const arr=filteredTasks(),tags=allTagNames();const sortLabel={due:"마감일 오름차순",priority:priorityOrder==="asc"?"우선순위 번호 오름차순 (1 → 20)":"우선순위 번호 내림차순 (20 → 1)",estimate:"예상 시간 짧은 순",newest:"최근 등록 순",title:"제목 가나다순"}[sortMode];return '<div class="page-toolbar"><div><div class="section-title">작은 실천 모아보기 ☑</div><div class="section-description">검색 '+(query?"· “"+esc(query)+"”":"· 전체")+' / 정렬 기준: '+sortLabel+'</div></div><button class="btn btn-primary" data-action="new-task">＋ 새 할 일</button></div><div class="toolbar-controls" style="margin-bottom:14px"><input class="field-control search" id="taskSearch" type="search" placeholder="⌕ 제목, 내용, 태그, 계획 검색" value="'+esc(query)+'"><select class="field-control" id="statusFilter" aria-label="상태 필터"><option value="all">모든 상태</option><option value="todo" '+(statusFilter==="todo"?"selected":"")+'>할 일</option><option value="inprogress" '+(statusFilter==="inprogress"?"selected":"")+'>진행 중</option><option value="done" '+(statusFilter==="done"?"selected":"")+'>완료</option></select>'+priorityPicker(priorityFilter,"filter")+'<select class="field-control" id="tagFilter" aria-label="태그 필터"><option value="">모든 태그</option>'+tags.map(t=>'<option value="'+esc(t)+'" '+(tagFilter===t?"selected":"")+'>'+esc(t)+'</option>').join("")+'</select><select class="field-control" id="sortMode" aria-label="정렬 기준"><option value="due" '+(sortMode==="due"?"selected":"")+'>마감일 오름차순</option><option value="priority" '+(sortMode==="priority"?"selected":"")+'>우선순위 번호순</option><option value="estimate" '+(sortMode==="estimate"?"selected":"")+'>예상 시간 짧은 순</option><option value="newest" '+(sortMode==="newest"?"selected":"")+'>최근 등록 순</option><option value="title" '+(sortMode==="title"?"selected":"")+'>제목 가나다순</option></select>'+(sortMode==="priority"?'<select class="field-control" id="priorityOrder" aria-label="우선순위 정렬 방향"><option value="asc" '+(priorityOrder==="asc"?"selected":"")+' >번호 오름차순 (1 → 20)</option><option value="desc" '+(priorityOrder==="desc"?"selected":"")+' >번호 내림차순 (20 → 1)</option></select>':"")+'</div><div class="result-caption" style="margin-bottom:11px">총 '+arr.length+'개 · 화면 표시 기준: '+sortLabel+'</div><section class="panel"><div class="item-list">'+(arr.length?arr.map(t=>'<div class="task-row"><button class="check '+(t.status==="done"?"done":"")+'" data-action="'+(t.status==="done"?"reopen-task":"complete-task")+'" data-id="'+esc(t.id)+'" aria-label="'+(t.status==="done"?"진행으로 되돌리기":"완료 처리")+'">'+(t.status==="done"?"✓":"")+'</button><div class="task-content"><div class="task-title '+(t.status==="done"?"is-done":"")+'">'+esc(t.title)+'</div><div class="task-meta"><span>'+esc(planLabel(t.planId))+'</span><span>· 마감 '+fmtDate(t.dueDate)+'</span><span>· 예상 '+fmtMinutes(t.estimatedMinutes)+'</span><span>· '+statusLabel(t.status)+'</span></div>'+(t.description?'<div class="activity-note">'+esc(t.description)+'</div>':"")+'<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:7px">'+taskTags(t)+'</div></div><div class="task-right">'+priorityMark(t.priority||"medium")+'<button class="btn btn-white btn-small" data-action="edit-task" data-id="'+esc(t.id)+'">수정</button><button class="btn btn-danger btn-small" data-action="delete-task" data-id="'+esc(t.id)+'">삭제</button><button class="btn btn-soft btn-small" data-action="new-run" data-task="'+esc(t.id)+'">＋ 실행 기록</button></div></div>').join(""):empty("🍡","조건에 맞는 할 일이 없어요","검색어나 필터를 바꾸거나 새로운 할 일을 추가해 보세요.","new-task","할 일 추가"))+'</div></section>'}
 function renderActivity(){const arr=data.runs.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return '<div class="page-toolbar"><div><div class="section-title">실제로 해본 것 기록하기 📝</div><div class="section-description">실제 시간과 막힌 이유는 계획 값을 바꾸지 않아요.</div></div><button class="btn btn-primary" data-action="new-run">＋ 실행 기록</button></div><section class="panel"><div class="panel-head"><div><div class="panel-title">실행 타임라인</div><div class="panel-sub">총 '+arr.length+'건 · 소요 시간 합계 '+fmtMinutes(arr.reduce((a,r)=>a+(Number(r.durationMinutes)||0),0))+'</div></div></div>'+(arr.length?arr.map(r=>'<div class="activity-item"><div class="timeline-dot"></div><div class="activity-title">'+esc(r.title||r.taskTitleSnapshot||"실행 기록")+'</div><div class="activity-time">'+fmtDate(r.startedAt,true)+' · '+fmtMinutes(r.durationMinutes)+' · '+esc(r.taskTitleSnapshot||"독립 기록")+'</div>'+(r.blocker?'<div class="activity-note"><b>막힌 부분</b><br>'+esc(r.blocker)+'</div>':"")+(r.note?'<div class="activity-note"><b>메모</b><br>'+esc(r.note)+'</div>':"")+'<div style="margin-top:7px"><button class="btn btn-danger btn-small" data-action="delete-run" data-id="'+esc(r.id)+'">기록 삭제</button></div></div>').join(""):empty("🌤️","아직 실행 기록이 없어요","시작 시각과 소요 시간, 막힌 부분을 기록해 다음번에 참고하세요.","new-run","기록 남기기"))+'</section>'}
-function renderReview(){const s=stats(),byPlan=data.plans.map(p=>{const ts=data.tasks.filter(t=>t.planId===p.id);return{p:p,total:ts.length,done:ts.filter(t=>t.status==="done").length,mins:data.runs.filter(r=>r.planId===p.id).reduce((n,r)=>n+(Number(r.durationMinutes)||0),0)}});const events=data.completionEvents.slice().sort((a,b)=>new Date(b.at)-new Date(a.at));return '<div class="grid stats">'+statCard("☑","완료 기록",s.done+"회","완료 상태로 바뀐 횟수","tone-purple")+statCard("◷","실행한 시간",fmtMinutes(s.mins),"실행 기록의 소요 시간 합계","tone-mint")+statCard("✿","진행 중 할 일",s.open+"개","지금 이어갈 수 있는 일","tone-pink")+statCard("⌁","계획 예상 시간",fmtMinutes(s.planMins),"실제 시간과 별도로 보존","tone-yellow")+'</div><div class="grid home-grid"><section class="panel"><div class="panel-head"><div><div class="panel-title">계획별 돌아보기 🌱</div><div class="panel-sub">현재 상태와 연결된 실제 기록 시간을 나눠서 보여줘요.</div></div></div>'+(byPlan.length?byPlan.map(x=>'<div class="history-row"><strong>'+esc(x.p.title)+'</strong><small>완료 '+x.done+' / '+x.total+'개 · 계획 예상 '+fmtMinutes(x.p.estimatedMinutes)+' · 실제 기록 '+fmtMinutes(x.mins)+'</small><div class="progress-line"><span style="width:'+(x.total?Math.round(x.done/x.total*100):0)+'%"></span></div>'+(x.p.successCriteria?'<div class="history-diff"><b>성공 기준</b><br>'+esc(x.p.successCriteria)+'</div>':"")+'</div>').join(""):empty("🪴","아직 돌아볼 계획이 없어요","계획과 할 일을 추가하면 이곳에 진행 상황이 모여요.","new-plan","계획 추가"))+'</section><section class="panel"><div class="panel-head"><div><div class="panel-title">완료 히스토리 💖</div><div class="panel-sub">완료 이벤트가 중복 없이 누적돼요.</div></div></div>'+(events.length?events.slice(0,12).map(e=>'<div class="history-row"><strong>✓ '+esc(e.taskTitleSnapshot||"완료한 할 일")+'</strong><small>'+fmtDate(e.at,true)+'</small></div>').join(""):empty("🎀","첫 완료를 기다리고 있어요","할 일을 완료로 바꾸면 이력이 기록돼요."))+'</section></div><section class="panel" style="margin-top:18px"><div class="panel-head"><div><div class="panel-title">나의 데이터 관리</div><div class="panel-sub">현재 기록은 이 브라우저에 저장됩니다. 주기적으로 백업 파일을 내려받아 주세요.</div></div></div><div class="card-actions"><button class="btn btn-soft" data-action="export-data">↧ 전체 백업 (JSON)</button><button class="btn btn-white" data-action="export-csv">↧ Excel용 CSV</button><button class="btn btn-white" data-action="export-txt">↧ TXT 내보내기</button><button class="btn btn-white" data-action="import-data">↥ 백업 가져오기</button><button class="btn btn-white" data-action="show-storage-note">저장 방식 안내</button></div><div class="hint-box" style="margin-top:13px">🔒 개인 정보 보호: 이 버전은 데이터를 서버로 전송하지 않고 현재 브라우저의 로컬 저장소에 보관합니다. 브라우저 데이터 삭제 또는 다른 기기에서는 기록이 사라지거나 보이지 않을 수 있어요. 백업 파일을 안전한 곳에 보관하세요.</div></section>'}
+function renderReview(){const s=stats(),byPlan=data.plans.map(p=>{const ts=data.tasks.filter(t=>t.planId===p.id);return{p:p,total:ts.length,done:ts.filter(t=>t.status==="done").length,mins:data.runs.filter(r=>r.planId===p.id).reduce((n,r)=>n+(Number(r.durationMinutes)||0),0)}});const events=data.completionEvents.slice().sort((a,b)=>new Date(b.at)-new Date(a.at));return '<div class="grid stats">'+statCard("☑","완료 기록",s.done+"회","완료 상태로 바뀐 횟수","tone-purple")+statCard("◷","실행한 시간",fmtMinutes(s.mins),"실행 기록의 소요 시간 합계","tone-mint")+statCard("✿","진행 중 할 일",s.open+"개","지금 이어갈 수 있는 일","tone-pink")+statCard("⌁","계획 예상 시간",fmtMinutes(s.planMins),"실제 시간과 별도로 보존","tone-yellow")+'</div><div class="grid home-grid"><section class="panel"><div class="panel-head"><div><div class="panel-title">계획별 돌아보기 🌱</div><div class="panel-sub">현재 상태와 연결된 실제 기록 시간을 나눠서 보여줘요.</div></div></div>'+(byPlan.length?byPlan.map(x=>'<div class="history-row"><strong>'+esc(x.p.title)+'</strong><small>완료 '+x.done+' / '+x.total+'개 · 계획 예상 '+fmtMinutes(x.p.estimatedMinutes)+' · 실제 기록 '+fmtMinutes(x.mins)+'</small><div class="progress-line"><span style="width:'+(x.total?Math.round(x.done/x.total*100):0)+'%"></span></div>'+(x.p.successCriteria?'<div class="history-diff"><b>성공 기준</b><br>'+esc(x.p.successCriteria)+'</div>':"")+'</div>').join(""):empty("🪴","아직 돌아볼 계획이 없어요","계획과 할 일을 추가하면 이곳에 진행 상황이 모여요.","new-plan","계획 추가"))+'</section><section class="panel"><div class="panel-head"><div><div class="panel-title">완료 히스토리 💖</div><div class="panel-sub">완료 이벤트가 중복 없이 누적돼요.</div></div></div>'+(events.length?events.slice(0,12).map(e=>'<div class="history-row"><strong>✓ '+esc(e.taskTitleSnapshot||"완료한 할 일")+'</strong><small>'+fmtDate(e.at,true)+'</small></div>').join(""):empty("🎀","첫 완료를 기다리고 있어요","할 일을 완료로 바꾸면 이력이 기록돼요."))+'</section></div><section class="panel" style="margin-top:18px"><div class="panel-head"><div><div class="panel-title">나의 데이터 관리</div><div class="panel-sub">현재 기록은 이 브라우저에 저장됩니다. 주기적으로 백업 파일을 내려받아 주세요.</div></div></div><div class="card-actions"><button class="btn btn-soft" data-action="export-data">↧ 전체 백업 (JSON)</button><button class="btn btn-white" data-action="export-csv">↧ Excel용 CSV</button><button class="btn btn-white" data-action="export-txt">↧ TXT 내보내기</button><button class="btn btn-white" data-action="import-data">↥ 백업 가져오기</button><button class="btn btn-white" data-action="show-storage-note">저장 방식 안내</button></div><div class="hint-box" style="margin-top:13px">☁️ 이 과제용 버전은 Vercel Blob 중앙 저장소를 사용합니다. 로그인 없이 누구나 기록을 읽고 수정할 수 있으므로 민감한 정보는 넣지 마세요. 다른 컴퓨터에서 변경된 내용은 중앙 기록 새로고침으로 가져올 수 있으며, JSON 백업을 안전하게 보관하세요.</div></section>'}
 function render(){const root=document.getElementById("appContent");root.innerHTML=page==="journal"?renderJournal():page==="plans"?renderPlans():page==="tasks"?renderTasks():page==="activity"?renderActivity():page==="review"?renderReview():renderHome()}
 function durationField(label,totalMinutes,opts){opts=opts||{};const total=Math.max(0,Math.floor(Number(totalMinutes)||0)),hours=Math.floor(total/60),minutes=total%60;return '<div class="form-field '+(opts.full?"full":"")+'"><label for="estimatedHours">'+esc(label)+'</label><div class="duration-control" data-duration-group><div class="duration-part"><input id="estimatedHours" name="estimatedHours" type="number" min="0" step="1" value="'+hours+'" data-duration-unit="hours" aria-label="예상 시간 시간"><span>시간</span></div><span class="duration-separator">:</span><div class="duration-part"><input id="estimatedRemainder" name="estimatedRemainder" type="number" min="0" max="59" step="1" value="'+minutes+'" data-duration-unit="minutes" aria-label="예상 시간 분"><span>분</span></div><div class="duration-summary" data-duration-summary>총 예상 시간: '+esc(fmtMinutes(total))+'</div></div></div>'}
 function durationFromForm(hoursValue,minutesValue){const hours=Math.max(0,Math.floor(Number(hoursValue)||0)),minutes=Math.max(0,Math.floor(Number(minutesValue)||0));return hours*60+minutes}
@@ -165,12 +363,14 @@ function exportCsv(){const columns=["자료 종류","ID","날짜","제목","본�
 function exportTxt(){const out=["Personal Diary · 전체 자료 내보내기","내보낸 시각: "+nowISO(),"","=== 계획 ("+data.plans.length+") ==="];data.plans.forEach(p=>out.push("["+p.title+"]","ID: "+p.id,"분류: "+p.category,"상태: "+p.status,"기간: "+(p.startDate||"미정")+" ~ "+(p.endDate||"미정"),"예상 시간: "+fmtMinutes(p.estimatedMinutes),"설명: "+(p.description||""),"성공 기준: "+(p.successCriteria||""),"변경 이력: "+JSON.stringify(p.history||[]),""));out.push("=== 할 일 ("+data.tasks.length+") ===");data.tasks.forEach(t=>out.push("["+t.title+"]","ID: "+t.id,"계획: "+planLabel(t.planId),"상태: "+statusLabel(t.status),"우선순위: "+priorityNumber(t.priority),"마감: "+(t.dueDate||"미정"),"예상 시간: "+fmtMinutes(t.estimatedMinutes),"태그: "+(t.tags||[]).join(", "),"설명: "+(t.description||""),"생성: "+(t.createdAt||""),"완료: "+(t.completedAt||"미완료"),""));out.push("=== 실행 기록 ("+data.runs.length+") ===");data.runs.forEach(r=>out.push("["+(r.title||r.taskTitleSnapshot||"실행 기록")+"]","ID: "+r.id,"시작: "+(r.startedAt||""),"종료: "+(r.endedAt||""),"실행 시간: "+fmtMinutes(r.durationMinutes),"연결 할 일: "+(r.taskTitleSnapshot||"독립 기록"),"막힌 부분: "+(r.blocker||""),"메모: "+(r.note||""),""));out.push("=== 완료 이력 ("+data.completionEvents.length+") ===");data.completionEvents.forEach(e=>out.push("- "+e.taskTitleSnapshot+" / 완료: "+e.at+" / 주기: "+e.cycleKey));out.push("","=== 일기 ("+(data.entries||[]).length+") ===");(data.entries||[]).forEach(e=>out.push("["+e.date+"] "+e.title,"기분: "+e.mood,"태그: "+(e.tags||[]).join(", "),"ID: "+e.id,e.content,""));downloadFile("personal-diary-all-data-"+new Date().toISOString().slice(0,10)+".txt","\uFEFF"+out.join("\n"),"text/plain;charset=utf-8");showToast("전체 자료를 TXT 파일로 저장했어요.")}
 function exportData(){const payload={app:"Personal Diary",schemaVersion:2,exportedAt:nowISO(),data:{plans:data.plans,tasks:data.tasks,runs:data.runs,completionEvents:data.completionEvents,entries:data.entries||[]}};const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="personal-diary-backup-"+new Date().toISOString().slice(0,10)+".json";a.click();URL.revokeObjectURL(url);showToast("계획·할 일·일기·실행 기록을 포함한 전체 백업을 내려받았어요.")}
 function importDataFile(file){if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(String(reader.result||""));const d=parsed.data||parsed;if(!d||typeof d!=="object"||!Array.isArray(d.plans)||!Array.isArray(d.tasks)||!Array.isArray(d.runs)||!Array.isArray(d.completionEvents))throw new Error("wrong schema");if(!confirm("현재 다이어리 데이터를 백업 파일의 내용으로 바꿀까요? 현재 상태를 먼저 내보내기 해두세요."))return;data=normalizeData(d);save();render();showToast("백업 데이터를 불러왔어요.")}catch(e){showToast("유효한 Personal Diary 백업 파일이 아니에요.")}};reader.readAsText(file)}
-function handleAction(el){const a=el.dataset.action,tid=el.dataset.id;if(!a)return;if(a==="new-journal")openJournalForm();else if(a==="edit-journal")openJournalForm(tid);else if(a==="delete-journal"){const entry=data.entries.find(x=>x.id===tid);if(entry&&confirm("“"+entry.title+"” 일기를 삭제할까요?")){data.entries=data.entries.filter(x=>x.id!==tid);save();render();showToast("일기를 삭제했어요.")}}else if(a==="new-plan")openPlanForm();else if(a==="edit-plan")openPlanForm(tid);else if(a==="plan-history")showPlanHistory(tid);else if(a==="new-task")openTaskForm("",el.dataset.plan||"");else if(a==="edit-task")openTaskForm(tid);else if(a==="complete-task")completeTask(tid);else if(a==="reopen-task")reopenTask(tid);else if(a==="delete-task"){const t=getTask(tid);if(t&&confirm("“"+t.title+"” 할 일을 삭제할까요? 실행 기록은 남겨두고 할 일만 목록에서 삭제합니다.")){data.tasks=data.tasks.filter(x=>x.id!==tid);data.runs.forEach(r=>{if(r.taskId===tid){r.taskTitleSnapshot=r.taskTitleSnapshot||t.title;r.taskId=null}});save();render();showToast("할 일을 삭제했어요. 관련 실행 기록은 보존했어요.")}}else if(a==="new-run")openRunForm(el.dataset.task||"");else if(a==="delete-run"){if(confirm("이 실행 기록을 삭제할까요?")){data.runs=data.runs.filter(r=>r.id!==tid);save();render();showToast("실행 기록을 삭제했어요.")}}else if(a==="close-modal"){closeModal()}else if(a==="export-data")exportData();else if(a==="export-csv")exportCsv();else if(a==="export-txt")exportTxt();else if(a==="toggle-priority-picker"){const picker=el.closest("[data-priority-picker]");if(picker){const menu=picker.querySelector(".number-picker-menu"),trigger=picker.querySelector(".number-picker-trigger"),opening=menu.classList.contains("hide");document.querySelectorAll(".number-picker-menu").forEach(m=>m.classList.add("hide"));document.querySelectorAll(".number-picker-trigger").forEach(b=>b.setAttribute("aria-expanded","false"));if(opening){menu.classList.remove("hide");trigger.setAttribute("aria-expanded","true");const formValue=picker.querySelector('input[name="priority"]')?.value;const current=formValue||(priorityFilter==="all"?"":priorityFilter);const selected=current?menu.querySelector('[data-value="'+current+'"]'):null;if(selected)menu.scrollTop=Math.max(0,selected.offsetTop-2*selected.offsetHeight)}}else{} }else if(a==="set-priority-value"){const picker=el.closest("[data-priority-picker]");if(picker){const value=String(normalizePriority(el.dataset.value)),input=picker.querySelector('input[name="priority"]'),label=picker.querySelector("[data-selected-label]");if(input)input.value=value;if(label)label.textContent=value;picker.querySelector(".number-picker-menu").classList.add("hide");picker.querySelector(".number-picker-trigger").setAttribute("aria-expanded","false")}}else if(a==="set-priority-filter"){priorityFilter=el.dataset.value==="all"?"all":String(normalizePriority(el.dataset.value));render()}else if(a==="import-data")document.getElementById("importInput").click();else if(a==="show-storage-note")showModal("저장 방식 안내 🔒","현재 버전의 데이터 보관에 대해 알아두세요.",'<div class="hint-box">현재 버전은 브라우저 localStorage를 사용합니다. 다이어리 데이터를 앱 서버나 데이터베이스로 전송하지 않기 때문에 서버 계정 설정 없이 바로 사용할 수 있어요.</div><div class="history-diff" style="margin-top:12px">주의: 브라우저 데이터를 삭제하거나 다른 브라우저·기기를 사용하면 데이터가 자동으로 이동하지 않습니다. 돌아보기 화면에서 JSON 백업을 주기적으로 내보내 보관하세요. 로그인과 기기 간 동기화가 필요하다면 별도의 Supabase 프로젝트 연결과 접근 정책 설정이 필요합니다.</div>','확인','history')}
+function handleAction(el){const a=el.dataset.action,tid=el.dataset.id;if(!a)return;if(a==="new-journal")openJournalForm();else if(a==="edit-journal")openJournalForm(tid);else if(a==="delete-journal"){const entry=data.entries.find(x=>x.id===tid);if(entry&&confirm("“"+entry.title+"” 일기를 삭제할까요?")){data.entries=data.entries.filter(x=>x.id!==tid);save();render();showToast("일기를 삭제했어요.")}}else if(a==="new-plan")openPlanForm();else if(a==="edit-plan")openPlanForm(tid);else if(a==="plan-history")showPlanHistory(tid);else if(a==="new-task")openTaskForm("",el.dataset.plan||"");else if(a==="edit-task")openTaskForm(tid);else if(a==="complete-task")completeTask(tid);else if(a==="reopen-task")reopenTask(tid);else if(a==="delete-task"){const t=getTask(tid);if(t&&confirm("“"+t.title+"” 할 일을 삭제할까요? 실행 기록은 남겨두고 할 일만 목록에서 삭제합니다.")){data.tasks=data.tasks.filter(x=>x.id!==tid);data.runs.forEach(r=>{if(r.taskId===tid){r.taskTitleSnapshot=r.taskTitleSnapshot||t.title;r.taskId=null}});save();render();showToast("할 일을 삭제했어요. 관련 실행 기록은 보존했어요.")}}else if(a==="new-run")openRunForm(el.dataset.task||"");else if(a==="delete-run"){if(confirm("이 실행 기록을 삭제할까요?")){data.runs=data.runs.filter(r=>r.id!==tid);save();render();showToast("실행 기록을 삭제했어요.")}}else if(a==="close-modal"){closeModal()}else if(a==="export-data")exportData();else if(a==="export-csv")exportCsv();else if(a==="export-txt")exportTxt();else if(a==="toggle-priority-picker"){const picker=el.closest("[data-priority-picker]");if(picker){const menu=picker.querySelector(".number-picker-menu"),trigger=picker.querySelector(".number-picker-trigger"),opening=menu.classList.contains("hide");document.querySelectorAll(".number-picker-menu").forEach(m=>m.classList.add("hide"));document.querySelectorAll(".number-picker-trigger").forEach(b=>b.setAttribute("aria-expanded","false"));if(opening){menu.classList.remove("hide");trigger.setAttribute("aria-expanded","true");const formValue=picker.querySelector('input[name="priority"]')?.value;const current=formValue||(priorityFilter==="all"?"":priorityFilter);const selected=current?menu.querySelector('[data-value="'+current+'"]'):null;if(selected)menu.scrollTop=Math.max(0,selected.offsetTop-2*selected.offsetHeight)}}else{} }else if(a==="set-priority-value"){const picker=el.closest("[data-priority-picker]");if(picker){const value=String(normalizePriority(el.dataset.value)),input=picker.querySelector('input[name="priority"]'),label=picker.querySelector("[data-selected-label]");if(input)input.value=value;if(label)label.textContent=value;picker.querySelector(".number-picker-menu").classList.add("hide");picker.querySelector(".number-picker-trigger").setAttribute("aria-expanded","false")}}else if(a==="set-priority-filter"){priorityFilter=el.dataset.value==="all"?"all":String(normalizePriority(el.dataset.value));render()}else if(a==="import-data")document.getElementById("importInput").click();else if(a==="cloud-upload-local")uploadLocalDiaryToCloud(false);else if(a==="cloud-pull")pullSharedDiary();else if(a==="cloud-retry")initializeCloudSync();else if(a==="cloud-retry-save")scheduleCloudWrite(0);else if(a==="cloud-use-remote")usePendingCloudDiary();else if(a==="cloud-overwrite-remote")overwriteCloudWithLocal();else if(a==="show-storage-note")showModal("저장 방식 안내 🔒","현재 버전의 데이터 보관에 대해 알아두세요.",'<div class="hint-box">현재 과제용 버전은 Vercel Blob 중앙 저장소를 통해 여러 컴퓨터의 기록을 공유합니다. 최초에는 기존 기록이 있는 컴퓨터에서 “이 컴퓨터의 기존 기록을 중앙에 처음 업로드”를 눌러야 합니다.</div><div class="history-diff" style="margin-top:12px">로그인 기능이 아직 없으므로 사이트 방문자는 누구나 중앙 기록을 읽고 수정할 수 있습니다. 실제 개인정보는 넣지 말고 JSON 백업을 주기적으로 보관하세요. 다른 컴퓨터에 최신 기록을 바로 반영하려면 “중앙 기록 새로고침”을 누르세요.</div>','확인','history')}
 document.addEventListener("click",e=>{const nav=e.target.closest("[data-page]");if(nav){setPage(nav.dataset.page);return}const action=e.target.closest("[data-action]");if(action){if(action.dataset.action==="close-modal"&&action.classList.contains("modal-backdrop")&&e.target!==action)return;handleAction(action)}});
 document.addEventListener("submit",e=>{if(e.target&&e.target.id==="activeForm"){e.preventDefault();handleSubmit(e.target)}});
 document.addEventListener("input",e=>{if(e.target.matches("[data-duration-unit]")){updateDurationSummary(e.target.closest("[data-duration-group]"),false);return}if(e.target.id==="taskSearch"){const pos=e.target.selectionStart;query=e.target.value;const root=document.getElementById("appContent");root.innerHTML=renderTasks();const input=document.getElementById("taskSearch");input.focus();input.setSelectionRange(pos,pos)}});
 document.addEventListener("change",e=>{if(e.target.matches("[data-duration-unit]")){updateDurationSummary(e.target.closest("[data-duration-group]"),true)}else if(e.target.id==="statusFilter"){statusFilter=e.target.value;render()}else if(e.target.id==="priorityFilter"){priorityFilter=e.target.value;render()}else if(e.target.id==="tagFilter"){tagFilter=e.target.value;render()}else if(e.target.id==="sortMode"){sortMode=e.target.value;render()}else if(e.target.id==="priorityOrder"){priorityOrder=e.target.value==="desc"?"desc":"asc";render()}else if(e.target.id==="importInput"){importDataFile(e.target.files&&e.target.files[0]);e.target.value=""}});
 setPage("home");
+updateCloudPanel();
+initializeCloudSync();
 })();
 </script>
 </body>
