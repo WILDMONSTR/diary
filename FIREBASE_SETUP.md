@@ -35,6 +35,6 @@ The Firestore path is `users/{Firebase Auth UID}/diary/current`. The document st
 ## Important limits
 
 - Do not publish test rules that allow everyone to read/write. Security Rules must be published before using real diary data.
-- This is a personal diary sync implementation. If the same record is edited on multiple devices simultaneously, the last full-document write may win; avoid editing the same item at the exact same time. Separate new records are usually merged from the current browser cache when it reconnects.
+- This is an initial personal diary sync implementation using one Firestore document per user. If two devices edit at the same time, or one device makes offline edits while another device changes the cloud copy, the last full-document write can overwrite the other device's newer change. Stay online before editing and export backups regularly. For stronger multi-device conflict handling, the data model should be split into per-record documents with explicit deletion tracking.
 - The app checks document size before uploading and preserves the browser copy if cloud upload fails. A large diary may eventually need to be split into per-record documents.
 - The first migration only imports localStorage from the current browser. Any records stored on other browsers must be exported from those browsers and imported separately; do not assume localStorage from other machines appears automatically.
