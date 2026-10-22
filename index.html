@@ -162,7 +162,7 @@ function downloadPreSyncLocalBackup(){
     const backup=JSON.parse(localStorage.getItem(CLOUD_BACKUP_KEY)||"null");
     if(!backup||!backup.data)throw new Error("backup missing");
     const payload={app:"Personal Diary",schemaVersion:2,exportedAt:backup.savedAt||nowISO(),data:normalizeData(backup.data)};
-    downloadFile("personal-diary-before-auto-sync-"+new Date().toISOString().slice(0,10)+".json","\\uFEFF"+JSON.stringify(payload,null,2),"application/json;charset=utf-8");
+    downloadFile("personal-diary-before-auto-sync-"+new Date().toISOString().slice(0,10)+".json","\uFEFF"+JSON.stringify(payload,null,2),"application/json;charset=utf-8");
     showToast("기존 로컬 기록 백업을 저장했어요.");
   }catch(error){showToast("보관된 로컬 백업을 찾지 못했어요.")}
 }
