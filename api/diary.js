@@ -99,9 +99,13 @@ export default async function handler(req, res) {
 
     return send(res, 200, { ok: true, exists: true, updatedAt });
   } catch (error) {
-    console.error("Diary cloud write failed:", error?.message || error);
     const message = String(error?.message || "");
     const status = /exceeds|must be|invalid record|data\./i.test(message) ? 400 : 503;
+    if (status === 400) {
+      console.warn("Diary cloud write rejected:", message);
+    } else {
+      console.error("Diary cloud write failed:", error?.message || error);
+    }
     return send(res, status, {
       ok: false,
       error: status === 400
