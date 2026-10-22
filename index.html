@@ -289,6 +289,13 @@ async function pollSharedDiary(){
       }
       return;
     }
+    // The remote copy has not changed since this tab last synced.
+    // Local edits are pending saves, not a remote conflict; do not switch
+    // the tab to conflict state just because the debounce timer is running.
+    if(cloudLastSyncedData!==null&&remoteComparable===cloudLastSyncedData){
+      cloudUpdatedAt=result.updatedAt||cloudUpdatedAt;
+      return;
+    }
     if(cloudState==="empty"||cloudState==="error"){
       if(hasRecords(data)){
         cloudPendingRemote={...result,data:remoteData};
