@@ -213,17 +213,47 @@ function scheduleCloudWrite(delay){
     cloudSaveInFlight=true;
     updateCloudPanel();
     const snapshot=JSON.parse(JSON.stringify(data));
+    const snapshotComparable=comparableData(snapshot);
+    let adoptedRemote=false;
     try{
+      if(cloudLastSyncedData!==null){
+        const latest=await requestSharedDiary();
+        if(!latest.exists){
+          cloudState="error";
+          cloudStatusMessage="중앙 저장소를 확인할 수 없습니다. 이 컴퓨터의 기록은 그대로 보존했습니다.";
+          return;
+        }
+        const latestData=normalizeData(latest.data);
+        const latestComparable=comparableData(latestData);
+        if(latestComparable!==cloudLastSyncedData){
+          if(latestComparable===snapshotComparable){
+            cloudUpdatedAt=latest.updatedAt||cloudUpdatedAt;
+            cloudLastSyncedData=latestComparable;
+            cloudStatusMessage="";
+            return;
+          }
+          if(snapshotComparable===cloudLastSyncedData){
+            applySharedDiary({...latest,data:latestData});
+            adoptedRemote=true;
+            return;
+          }
+          cloudPendingRemote={...latest,data:latestData};
+          cloudState="conflict";
+          cloudStatusMessage="두 컴퓨터에서 서로 다른 변경이 있어 자동 덮어쓰기를 멈췄습니다.";
+          return;
+        }
+        cloudUpdatedAt=latest.updatedAt||cloudUpdatedAt;
+      }
       const result=await writeSharedDiary(snapshot);
       cloudUpdatedAt=result.updatedAt||cloudUpdatedAt;
-      cloudLastSyncedData=comparableData(snapshot);
+      cloudLastSyncedData=snapshotComparable;
       cloudStatusMessage="";
     }catch(error){
       cloudStatusMessage=error&&error.message?error.message:"저장 요청 실패";
     }finally{
       cloudSaveInFlight=false;
       updateCloudPanel();
-      if(!cloudStatusMessage&&JSON.stringify(data)!==JSON.stringify(snapshot))scheduleCloudWrite(400);
+      if(!adoptedRemote&&cloudState==="ready"&&!cloudStatusMessage&&JSON.stringify(data)!==JSON.stringify(snapshot))scheduleCloudWrite(400);
     }
   },typeof delay==="number"?delay:900);
   updateCloudPanel();
