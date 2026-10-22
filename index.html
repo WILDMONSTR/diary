@@ -105,7 +105,7 @@ const labels={home:["YOUR PERSONAL SPACE","오늘의 페이지를 펼쳐요 ✎"
 const blank=()=>({plans:[],tasks:[],runs:[],completionEvents:[],entries:[]});
 let data=loadData(),page="home",query="",statusFilter="all",priorityFilter="all",tagFilter="",sortMode="due",priorityOrder="asc",toastTimer;
 const lastCompletionClick=new Map();
-let cloudState="checking",cloudUpdatedAt=null,cloudSaveTimer=null,cloudSaveInFlight=false,cloudPendingRemote=null,cloudStatusMessage="",lastLocalEditAt=0;
+let cloudState="checking",cloudUpdatedAt=null,cloudSaveTimer=null,cloudSaveInFlight=false,cloudPendingRemote=null,cloudStatusMessage="",lastLocalEditAt=0,cloudLastSyncedData=null,cloudPollInFlight=false;
 function normalizeData(input){const d=input&&typeof input==="object"?input:{};const rawEvents=Array.isArray(d.completionEvents)?d.completionEvents:[];const completionEvents=rawEvents.filter(e=>e&&typeof e==="object").map(e=>({id:String(e.id||id()),taskId:String(e.taskId||""),taskTitleSnapshot:String(e.taskTitleSnapshot||"완료한 할 일"),cycleKey:String(e.cycleKey||"1"),at:validDateString(e.at)?String(e.at):nowISO()}));const cycleByTask={};completionEvents.forEach(e=>{const n=Number(e.cycleKey)||0;cycleByTask[e.taskId]=Math.max(cycleByTask[e.taskId]||0,n)});const plans=(Array.isArray(d.plans)?d.plans:[]).filter(p=>p&&typeof p==="object").map(p=>({...p,id:String(p.id||id()),title:String(p.title||"제목 없는 계획"),category:String(p.category||"기타"),description:String(p.description||""),startDate:String(p.startDate||""),endDate:String(p.endDate||""),successCriteria:String(p.successCriteria||""),estimatedMinutes:safeMinutes(p.estimatedMinutes),status:["active","paused","done"].includes(p.status)?p.status:"active",versionNo:Math.max(1,Number(p.versionNo)||1),history:Array.isArray(p.history)?p.history.filter(h=>h&&typeof h==="object").map(h=>({...h,title:String(h.title||"제목 없는 계획"),category:String(h.category||"기타"),description:String(h.description||""),startDate:String(h.startDate||""),endDate:String(h.endDate||""),successCriteria:String(h.successCriteria||""),estimatedMinutes:safeMinutes(h.estimatedMinutes),version:Math.max(1,Number(h.version)||1),savedAt:validDateString(h.savedAt)?String(h.savedAt):nowISO()})):[],createdAt:validDateString(p.createdAt)?String(p.createdAt):nowISO(),updatedAt:validDateString(p.updatedAt)?String(p.updatedAt):(validDateString(p.createdAt)?String(p.createdAt):nowISO())}));const tasks=(Array.isArray(d.tasks)?d.tasks:[]).filter(t=>t&&typeof t==="object").map(t=>({...t,id:String(t.id||id()),title:String(t.title||"제목 없는 할 일"),planId:typeof t.planId==="string"&&t.planId?t.planId:null,status:["todo","inprogress","done"].includes(t.status)?t.status:"todo",dueDate:typeof t.dueDate==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(t.dueDate)?t.dueDate:"",priority:normalizePriority(t.priority),estimatedMinutes:safeMinutes(t.estimatedMinutes),tags:Array.isArray(t.tags)?t.tags.map(x=>String(x).trim()).filter(Boolean):typeof t.tags==="string"?t.tags.split(",").map(x=>x.trim()).filter(Boolean):[],description:String(t.description||""),createdAt:validDateString(t.createdAt)?String(t.createdAt):nowISO(),updatedAt:validDateString(t.updatedAt)?String(t.updatedAt):(validDateString(t.createdAt)?String(t.createdAt):nowISO()),completedAt:validDateString(t.completedAt)?String(t.completedAt):null,completionCycle:Math.max(Number(t.completionCycle)||0,cycleByTask[String(t.id||"")]||0)}));const runs=(Array.isArray(d.runs)?d.runs:[]).filter(r=>r&&typeof r==="object").map(r=>({...r,id:String(r.id||id()),taskId:typeof r.taskId==="string"&&r.taskId?r.taskId:null,planId:typeof r.planId==="string"&&r.planId?r.planId:null,taskTitleSnapshot:String(r.taskTitleSnapshot||""),title:String(r.title||r.taskTitleSnapshot||"실행 기록"),startedAt:validDateString(r.startedAt)?String(r.startedAt):nowISO(),endedAt:validDateString(r.endedAt)?String(r.endedAt):null,durationMinutes:safeMinutes(r.durationMinutes),blocker:String(r.blocker||""),note:String(r.note||""),createdAt:validDateString(r.createdAt)?String(r.createdAt):nowISO()}));const entries=(Array.isArray(d.entries)?d.entries:[]).filter(e=>e&&typeof e==="object").map(e=>({id:String(e.id||id()),date:validDay(e.date)?String(e.date):dateInputNow().slice(0,10),title:String(e.title||"오늘의 기록"),content:String(e.content||""),mood:["🙂 좋았어요","😐 평범했어요","😮‍💨 지쳤어요","🌱 성장했어요","💭 생각이 많았어요"].includes(e.mood)?e.mood:"😐 평범했어요",tags:Array.isArray(e.tags)?e.tags.map(x=>String(x).trim()).filter(Boolean):typeof e.tags==="string"?e.tags.split(",").map(x=>x.trim()).filter(Boolean):[],createdAt:validDateString(e.createdAt)?String(e.createdAt):nowISO(),updatedAt:validDateString(e.updatedAt)?String(e.updatedAt):(validDateString(e.createdAt)?String(e.createdAt):nowISO())}));return{plans:plans,tasks:tasks,runs:runs,completionEvents:completionEvents,entries:entries}}
 function safeMinutes(value){const n=Number(value);return Number.isFinite(n)?Math.max(0,Math.round(n)):0}
 function validDateString(value){return typeof value==="string"&&value.trim()!==""&&!Number.isNaN(new Date(value).getTime())}
@@ -142,7 +142,7 @@ function updateCloudPanel(){
     const count=recordsSummary(data);
     panel.innerHTML='<strong>중앙 저장소가 아직 비어 있어요.</strong><p>'+(count>0?'이 컴퓨터에 계획·할 일·기록 '+count+'개가 있습니다. 기존 기록이 있는 A 컴퓨터에서 한 번만 업로드하세요.':'기존 기록이 있는 A 컴퓨터에서 먼저 중앙 저장소를 초기화해야 합니다.')+'</p><p class="cloud-muted">로그인 없이 공개되는 과제용 저장소입니다. 누구나 기록을 읽고 수정할 수 있으니 민감한 정보는 넣지 마세요.</p>'+(count>0?actions([button("cloud-upload-local","이 컴퓨터의 기존 기록을 중앙에 처음 업로드","btn-primary")]):"");
   }else if(cloudState==="ready"){
-    panel.innerHTML='<strong>중앙 동기화 연결됨 ✓</strong><p>이 컴퓨터의 저장 내용은 중앙 저장소에 반영됩니다. 다른 컴퓨터에서 최근 기록을 보려면 “중앙 기록 새로고침”을 누르세요.</p><p class="cloud-muted">로그인 없이 누구나 조회·수정할 수 있습니다. 여러 사람이 동시에 수정하면 마지막 저장이 먼저 저장된 변경을 덮어쓸 수 있어요.</p>'+(cloudSaveInFlight||cloudSaveTimer?'<p>중앙 저장 중…</p>':(cloudStatusMessage?'<p class="cloud-error">'+esc(cloudStatusMessage)+'</p>':''))+actions([button("cloud-pull","중앙 기록 새로고침","btn-white")].concat(cloudStatusMessage?[button("cloud-retry-save","현재 기록 다시 저장","btn-primary")]:[]));
+    panel.innerHTML='<strong>중앙 동기화 연결됨 ✓</strong><p>이 컴퓨터의 변경 사항은 자동 저장됩니다. 다른 컴퓨터의 변경 사항도 약 4초마다 자동으로 확인해 반영합니다. 별도로 “중앙 기록 새로고침”을 누르지 않아도 됩니다.</p><p class="cloud-muted">로그인 없이 누구나 조회·수정할 수 있습니다. 두 컴퓨터에서 동시에 수정하면 기록을 덮어쓰지 않고 선택 안내를 표시합니다.</p>'+(cloudSaveInFlight||cloudSaveTimer?'<p>중앙 저장 중…</p>':(cloudStatusMessage?'<p class="cloud-error">'+esc(cloudStatusMessage)+'</p>':''))+actions([button("cloud-pull","중앙 기록 새로고침","btn-white")].concat(cloudStatusMessage?[button("cloud-retry-save","현재 기록 다시 저장","btn-primary")]:[]));
   }else if(cloudState==="conflict"){
     panel.innerHTML='<strong>이 컴퓨터와 중앙 기록이 서로 달라요.</strong><p>기록을 자동으로 덮어쓰지 않았습니다. 먼저 로컬 기록을 백업한 뒤 어느 쪽을 사용할지 선택하세요.</p><p class="cloud-muted">“중앙 기록 사용”은 이 컴퓨터의 기록을 JSON 파일로 백업하고 중앙 기록을 불러옵니다. “이 컴퓨터 기록 업로드”는 중앙의 모든 기록을 덮어씁니다.</p>'+actions([button("cloud-use-remote","중앙 기록 사용","btn-white"),button("cloud-overwrite-remote","이 컴퓨터 기록으로 중앙 덮어쓰기","btn-primary")]);
   }else{
@@ -165,6 +165,7 @@ function applySharedDiary(result){
   data=normalizeData(result.data);
   localStorage.setItem(STORE_KEY,JSON.stringify(data));
   cloudUpdatedAt=result.updatedAt||null;
+  cloudLastSyncedData=comparableData(data);
   cloudState="ready";
   cloudPendingRemote=null;
   cloudStatusMessage="";
@@ -180,6 +181,7 @@ async function initializeCloudSync(){
     const result=await requestSharedDiary();
     if(!result.exists){
       cloudState="empty";
+      cloudLastSyncedData=null;
       updateCloudPanel();
       return;
     }
@@ -211,19 +213,107 @@ function scheduleCloudWrite(delay){
     cloudSaveInFlight=true;
     updateCloudPanel();
     const snapshot=JSON.parse(JSON.stringify(data));
+    const snapshotComparable=comparableData(snapshot);
+    let adoptedRemote=false;
     try{
+      if(cloudLastSyncedData!==null){
+        const latest=await requestSharedDiary();
+        if(!latest.exists){
+          cloudState="error";
+          cloudStatusMessage="중앙 저장소를 확인할 수 없습니다. 이 컴퓨터의 기록은 그대로 보존했습니다.";
+          return;
+        }
+        const latestData=normalizeData(latest.data);
+        const latestComparable=comparableData(latestData);
+        if(latestComparable!==cloudLastSyncedData){
+          if(latestComparable===snapshotComparable){
+            cloudUpdatedAt=latest.updatedAt||cloudUpdatedAt;
+            cloudLastSyncedData=latestComparable;
+            cloudStatusMessage="";
+            return;
+          }
+          if(snapshotComparable===cloudLastSyncedData){
+            applySharedDiary({...latest,data:latestData});
+            adoptedRemote=true;
+            return;
+          }
+          cloudPendingRemote={...latest,data:latestData};
+          cloudState="conflict";
+          cloudStatusMessage="두 컴퓨터에서 서로 다른 변경이 있어 자동 덮어쓰기를 멈췄습니다.";
+          return;
+        }
+        cloudUpdatedAt=latest.updatedAt||cloudUpdatedAt;
+      }
       const result=await writeSharedDiary(snapshot);
       cloudUpdatedAt=result.updatedAt||cloudUpdatedAt;
+      cloudLastSyncedData=snapshotComparable;
       cloudStatusMessage="";
     }catch(error){
       cloudStatusMessage=error&&error.message?error.message:"저장 요청 실패";
     }finally{
       cloudSaveInFlight=false;
       updateCloudPanel();
-      if(!cloudStatusMessage&&JSON.stringify(data)!==JSON.stringify(snapshot))scheduleCloudWrite(400);
+      if(!adoptedRemote&&cloudState==="ready"&&!cloudStatusMessage&&JSON.stringify(data)!==JSON.stringify(snapshot))scheduleCloudWrite(400);
     }
   },typeof delay==="number"?delay:900);
   updateCloudPanel();
+}
+async function pollSharedDiary(){
+  if(cloudPollInFlight||document.visibilityState==="hidden")return;
+  if(cloudState!=="ready"&&cloudState!=="empty"&&cloudState!=="error")return;
+  if(cloudSaveTimer||cloudSaveInFlight)return;
+  cloudPollInFlight=true;
+  try{
+    const result=await requestSharedDiary();
+    if(!result.exists){
+      if(cloudState==="empty")return;
+      if(cloudState==="ready"){
+        cloudState="error";
+        cloudStatusMessage="중앙 저장소를 확인할 수 없습니다. 이 컴퓨터의 기록은 그대로 보존했습니다.";
+        updateCloudPanel();
+      }else{
+        cloudState="empty";
+        cloudLastSyncedData=null;
+        updateCloudPanel();
+      }
+      return;
+    }
+    const remoteData=normalizeData(result.data);
+    const remoteComparable=comparableData(remoteData);
+    const localComparable=comparableData(data);
+    if(localComparable===remoteComparable){
+      cloudUpdatedAt=result.updatedAt||cloudUpdatedAt;
+      cloudLastSyncedData=remoteComparable;
+      if(cloudState!=="ready"){
+        applySharedDiary({...result,data:remoteData});
+      }
+      return;
+    }
+    if(cloudState==="empty"||cloudState==="error"){
+      if(hasRecords(data)){
+        cloudPendingRemote={...result,data:remoteData};
+        cloudState="conflict";
+        cloudStatusMessage="이 컴퓨터의 기록과 중앙 기록이 다릅니다. 안전을 위해 자동으로 덮어쓰지 않았습니다.";
+        updateCloudPanel();
+      }else{
+        applySharedDiary({...result,data:remoteData});
+      }
+      return;
+    }
+    const hasUnsentLocalChanges=cloudLastSyncedData===null||localComparable!==cloudLastSyncedData;
+    if(!hasUnsentLocalChanges){
+      applySharedDiary({...result,data:remoteData});
+      return;
+    }
+    cloudPendingRemote={...result,data:remoteData};
+    cloudState="conflict";
+    cloudStatusMessage="두 컴퓨터에서 서로 다른 변경이 있어 자동 덮어쓰기를 멈췄습니다.";
+    updateCloudPanel();
+  }catch(error){
+    console.warn("Automatic diary sync check failed:",error&&error.message?error.message:error);
+  }finally{
+    cloudPollInFlight=false;
+  }
 }
 async function uploadLocalDiaryToCloud(overwrite){
   if(cloudState!=="empty"&&!overwrite)return;
@@ -235,6 +325,7 @@ async function uploadLocalDiaryToCloud(overwrite){
   try{
     const result=await writeSharedDiary(data);
     cloudUpdatedAt=result.updatedAt||null;
+    cloudLastSyncedData=comparableData(data);
     cloudState="ready";
     cloudPendingRemote=null;
     cloudStatusMessage="";
@@ -371,6 +462,8 @@ document.addEventListener("change",e=>{if(e.target.matches("[data-duration-unit]
 setPage("home");
 updateCloudPanel();
 initializeCloudSync();
+setInterval(pollSharedDiary,4000);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)pollSharedDiary()});
 })();
 </script>
 </body>
