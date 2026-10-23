@@ -77,9 +77,44 @@ body{background-color:var(--canvas);background-image:radial-gradient(#ded9ce .65
 .review-drilldown-title{font-size:13px;font-weight:800;line-height:1.6}
 .review-drilldown-count{margin-top:4px;color:#77748b;font-size:13px;line-height:1.7}
 .review-drilldown-count strong{font-size:15px;color:#6558dc;font-weight:850}
+
+/* Supabase email authentication */
+.auth-gate{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(145deg,#eaf4ff 0%,#fff8e5 52%,#f1efff 100%);overflow:auto}
+.auth-gate.hidden{display:none}
+.auth-card{width:min(440px,100%);padding:28px;background:#fff;border:1px solid #e9e4d8;border-radius:24px;box-shadow:0 14px 0 rgba(226,219,204,.45),0 24px 70px rgba(62,58,92,.12)}
+.auth-brand{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.auth-brand-icon{width:44px;height:44px;display:grid;place-items:center;border-radius:15px;background:#dff1ff;font-size:23px}
+.auth-card h1{font-size:23px;letter-spacing:-.7px;margin:0 0 7px}
+.auth-card .auth-description{font-size:12px;color:#89869d;margin:0 0 20px}
+.auth-field{display:flex;flex-direction:column;gap:6px;margin:13px 0}
+.auth-field label{font-size:12px;font-weight:800;color:#716e86}
+.auth-field input{width:100%;min-height:44px;border:1px solid #e9e6f1;border-radius:11px;padding:11px 12px;background:#fff;color:var(--ink)}
+.auth-submit{width:100%;margin-top:8px;min-height:44px}
+.auth-link{display:block;margin:14px auto 0;background:transparent;color:#6559db;font-size:12px;font-weight:800;text-align:center}
+.auth-message{min-height:20px;margin:12px 0 0;color:#6e6696;font-size:12px;overflow-wrap:anywhere}
+.auth-note{margin:14px 0 0;padding-top:13px;border-top:1px dashed #e9e4d8;color:#9893a7;font-size:10px;line-height:1.7}
+.account-controls{display:flex;align-items:center;gap:8px;min-width:0}
+.account-email{max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#77758b;font-size:11px;font-weight:700}
+@media(max-width:720px){.auth-card{padding:22px}.account-email{max-width:95px}.account-controls{gap:4px}}
 </style>
 </head>
 <body>
+
+<div id="authGate" class="auth-gate" role="region" aria-label="다이어리 로그인">
+  <section class="auth-card">
+    <div class="auth-brand"><div class="auth-brand-icon">✎</div><div><strong>Personal Diary</strong><div class="muted" style="font-size:11px">나만의 기록 공간</div></div></div>
+    <h1 id="authTitle">다이어리에 로그인</h1>
+    <p class="auth-description" id="authDescription">내 계정으로 로그인해 개인 기록을 열어보세요.</p>
+    <form id="authForm">
+      <div class="auth-field"><label for="authEmail">이메일</label><input id="authEmail" name="email" type="email" autocomplete="email" required></div>
+      <div class="auth-field"><label for="authPassword">비밀번호</label><input id="authPassword" name="password" type="password" autocomplete="current-password" minlength="8" required><span class="form-help">8자 이상을 권장합니다.</span></div>
+      <button class="btn btn-primary auth-submit" id="authSubmit" type="submit">로그인</button>
+    </form>
+    <button class="auth-link" id="authModeToggle" type="button">계정이 없으신가요? 회원가입</button>
+    <p class="auth-message" id="authMessage" role="status" aria-live="polite"></p>
+    <p class="auth-note">회원가입 후 이메일 확인 링크를 눌러야 로그인할 수 있습니다. 이 단계에서는 기록을 계정별로 이 브라우저에 저장하며, 중앙 서버 동기화는 API 인증 적용 후 활성화됩니다.</p>
+  </section>
+</div>
 <div class="layout">
 <aside class="sidebar">
   <div class="brand"><div class="brand-icon">✎</div><div><strong>Personal Diary</strong><small>notes, plans & little wins</small></div></div>
@@ -95,24 +130,28 @@ body{background-color:var(--canvas);background-image:radial-gradient(#ded9ce .65
   <div class="side-bottom">MADE FOR YOUR EVERYDAY · 2026</div>
 </aside>
 <main class="main">
-    <header class="topbar"><div><div class="eyebrow" id="eyebrow">YOUR PERSONAL SPACE</div><h1 class="page-title" id="pageTitle">오늘도, 나답게 ✨</h1><p class="page-sub" id="pageSub">생각을 정리하고 작은 성취를 모아보세요.</p></div><div class="top-actions"><div class="today-pill" id="todayPill"></div><button class="btn btn-primary" data-action="new-task">＋ 새 할 일</button></div></header>
+    <header class="topbar"><div><div class="eyebrow" id="eyebrow">YOUR PERSONAL SPACE</div><h1 class="page-title" id="pageTitle">오늘도, 나답게 ✨</h1><p class="page-sub" id="pageSub">생각을 정리하고 작은 성취를 모아보세요.</p></div><div class="top-actions"><div class="account-controls hide" id="accountControls"><span class="account-email" id="signedInEmail"></span><button type="button" class="btn btn-white btn-small" data-action="sign-out">로그아웃</button></div><div class="today-pill" id="todayPill"></div><button class="btn btn-primary" data-action="new-task">＋ 새 할 일</button></div></header>
   <section id="appContent"></section>
-  <div class="footer-note">당신의 속도로, 당신의 이야기를 기록해요 ✿</div><p class="privacy-warning">현재 과제용 버전은 Vercel 중앙 저장소와 동기화됩니다. 로그인 없이 누구나 기록을 읽고 수정할 수 있으므로 실제 개인정보나 민감한 내용을 넣지 마세요. 중요한 기록은 JSON 백업으로 보관하세요.</p>
+  <div class="footer-note">당신의 속도로, 당신의 이야기를 기록해요 ✿</div><p class="privacy-warning">현재 단계에서는 로그인한 계정별로 이 브라우저에 기록을 분리해 저장합니다. 중앙 동기화는 API 인증과 사용자별 서버 저장소 적용 후 활성화됩니다. 중요한 기록은 JSON 백업으로 보관하세요.</p>
 </main>
 </div>
 <div id="modalRoot"></div><div id="toastRoot" aria-live="polite"></div>
 <input id="importInput" class="hide" type="file" accept="application/json">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 (function(){
 "use strict";
 const STORE_KEY="mellow-diary-v1";
-const CLOUD_BASELINE_KEY=STORE_KEY+"-cloud-baseline";
-const CLOUD_BACKUP_KEY=STORE_KEY+"-pre-central-sync-backup";
+const SUPABASE_URL="https://ndizvumhicvtlnxpntuk.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY="sb_publishable_AgBlHJTYkBRUQ4KYkqNOew_0NH9ICJV";
+let authClient=null,activeUser=null,authMode="signin",authBusy=false;
+function currentStoreKey(){return activeUser?STORE_KEY+"-user-"+activeUser.id:null}
+function userStorageKey(suffix){const key=currentStoreKey();return key?key+(suffix||""):null}
 const labels={home:["YOUR PERSONAL SPACE","오늘의 페이지를 펼쳐요 ✎","생각을 정리하고 작은 성취를 모아보세요."],plans:["GENTLE PLANNING","나의 계획","하고 싶은 일과 도달하고 싶은 모습을 정리해요."],tasks:["LITTLE BY LITTLE","할 일 목록","오늘의 작은 실천을 찾고, 나에게 맞는 순서로 정리해요."],activity:["REAL LIFE LOG","실행 기록","계획과 별개로 실제로 해본 것들을 남겨요."],review:["LOOKING BACK","돌아보기","얼마나 해냈는지보다 무엇을 배웠는지도 살펴봐요."],journal:["DAILY JOURNAL","나의 일기장","그날의 생각과 순간을 편하게 남겨요."]};
 const blank=()=>({plans:[],tasks:[],runs:[],completionEvents:[],entries:[]});
-let data=loadData(),page="home",query="",statusFilter="all",priorityFilter="all",tagFilter="",planFilter="",sortMode="sequence",priorityOrder="asc",toastTimer;
+let data=blank(),page="home",query="",statusFilter="all",priorityFilter="all",tagFilter="",planFilter="",sortMode="sequence",priorityOrder="asc",toastTimer;
 const lastCompletionClick=new Map();
-let cloudState="checking",cloudUpdatedAt=null,cloudSaveTimer=null,cloudSaveInFlight=false,cloudPendingRemote=null,cloudStatusMessage="",lastLocalEditAt=0,cloudLastSyncedData=readStoredCloudBaseline(),cloudPollInFlight=false;
+let cloudState="disabled",cloudUpdatedAt=null,cloudSaveTimer=null,cloudSaveInFlight=false,cloudPendingRemote=null,cloudStatusMessage="중앙 동기화는 API 인증을 적용한 다음 단계에서 활성화됩니다.",lastLocalEditAt=0,cloudLastSyncedData=null,cloudPollInFlight=false;
 function normalizeData(input){const d=input&&typeof input==="object"?input:{};const rawEvents=Array.isArray(d.completionEvents)?d.completionEvents:[];const completionEvents=rawEvents.filter(e=>e&&typeof e==="object").map(e=>({id:String(e.id||id()),taskId:String(e.taskId||""),taskTitleSnapshot:String(e.taskTitleSnapshot||"완료한 할 일"),cycleKey:String(e.cycleKey||"1"),at:validDateString(e.at)?String(e.at):nowISO()}));const cycleByTask={};completionEvents.forEach(e=>{const n=Number(e.cycleKey)||0;cycleByTask[e.taskId]=Math.max(cycleByTask[e.taskId]||0,n)});const plans=(Array.isArray(d.plans)?d.plans:[]).filter(p=>p&&typeof p==="object").map(p=>({...p,id:String(p.id||id()),title:String(p.title||"제목 없는 계획"),category:String(p.category||"기타"),description:String(p.description||""),startDate:String(p.startDate||""),endDate:String(p.endDate||""),successCriteria:String(p.successCriteria||""),priority:normalizePriority(p.priority),estimatedMinutes:safeMinutes(p.estimatedMinutes),status:["active","paused","done"].includes(p.status)?p.status:"active",versionNo:Math.max(1,Number(p.versionNo)||1),history:Array.isArray(p.history)?p.history.filter(h=>h&&typeof h==="object").map(h=>({...h,title:String(h.title||"제목 없는 계획"),category:String(h.category||"기타"),description:String(h.description||""),startDate:String(h.startDate||""),endDate:String(h.endDate||""),successCriteria:String(h.successCriteria||""),priority:normalizePriority(h.priority),estimatedMinutes:safeMinutes(h.estimatedMinutes),version:Math.max(1,Number(h.version)||1),savedAt:validDateString(h.savedAt)?String(h.savedAt):nowISO()})):[],createdAt:validDateString(p.createdAt)?String(p.createdAt):nowISO(),updatedAt:validDateString(p.updatedAt)?String(p.updatedAt):(validDateString(p.createdAt)?String(p.createdAt):nowISO())}));const usedSequenceNumbers=new Set();
 const tasks=(Array.isArray(d.tasks)?d.tasks:[]).filter(t=>t&&typeof t==="object").map((t,index)=>{
   let sequenceNo=Number(t.sequenceNo);
@@ -126,10 +165,12 @@ const tasks=(Array.isArray(d.tasks)?d.tasks:[]).filter(t=>t&&typeof t==="object"
 function safeMinutes(value){const n=Number(value);return Number.isFinite(n)?Math.max(0,Math.round(n)):0}
 function validDateString(value){return typeof value==="string"&&value.trim()!==""&&!Number.isNaN(new Date(value).getTime())}
 function validDay(value){if(typeof value!=="string"||!/^\\d{4}-\\d{2}-\\d{2}$/.test(value))return false;const p=value.split("-").map(Number),d=new Date(p[0],p[1]-1,p[2]);return d.getFullYear()===p[0]&&d.getMonth()===p[1]-1&&d.getDate()===p[2]}
-function loadData(){try{const raw=localStorage.getItem(STORE_KEY);if(!raw)return blank();return normalizeData(JSON.parse(raw))}catch(e){return blank()}}
+function loadData(){const key=currentStoreKey();if(!key)return blank();try{const raw=localStorage.getItem(key);if(!raw)return blank();return normalizeData(JSON.parse(raw))}catch(e){return blank()}}
 function save(){
+  const key=currentStoreKey();
+  if(!key){showToast("먼저 로그인해 주세요.");return false;}
   try{
-    localStorage.setItem(STORE_KEY,JSON.stringify(data));
+    localStorage.setItem(key,JSON.stringify(data));
     lastLocalEditAt=Date.now();
     if(cloudState==="ready")scheduleCloudWrite();
     updateCloudPanel();
@@ -149,31 +190,36 @@ function recordsSummary(value){
 function comparableData(value){return JSON.stringify(normalizeData(value))}
 function readStoredCloudBaseline(){
   try{
-    const raw=localStorage.getItem(CLOUD_BASELINE_KEY);
+    const key=userStorageKey("-cloud-baseline");if(!key)return null;
+    const raw=localStorage.getItem(key);
     return raw?comparableData(JSON.parse(raw)):null;
   }catch(error){return null}
 }
 function storeCloudBaseline(value){
   const normalized=normalizeData(value);
   cloudLastSyncedData=comparableData(normalized);
-  try{localStorage.setItem(CLOUD_BASELINE_KEY,JSON.stringify(normalized))}catch(error){}
+  const key=userStorageKey("-cloud-baseline");
+  try{if(key)localStorage.setItem(key,JSON.stringify(normalized))}catch(error){}
   return cloudLastSyncedData;
 }
 function hasPreSyncBackup(){
-  try{return !!localStorage.getItem(CLOUD_BACKUP_KEY)}catch(error){return false}
+  const key=userStorageKey("-pre-central-sync-backup");
+  try{return !!(key&&localStorage.getItem(key))}catch(error){return false}
 }
 function preservePreSyncLocalCache(){
   if(!hasRecords(data))return true;
   try{
-    if(!localStorage.getItem(CLOUD_BACKUP_KEY)){
-      localStorage.setItem(CLOUD_BACKUP_KEY,JSON.stringify({savedAt:nowISO(),data:normalizeData(data)}));
+    const key=userStorageKey("-pre-central-sync-backup");
+    if(key&&!localStorage.getItem(key)){
+      localStorage.setItem(key,JSON.stringify({savedAt:nowISO(),data:normalizeData(data)}));
     }
     return true;
   }catch(error){return false}
 }
 function downloadPreSyncLocalBackup(){
   try{
-    const backup=JSON.parse(localStorage.getItem(CLOUD_BACKUP_KEY)||"null");
+    const key=userStorageKey("-pre-central-sync-backup");
+    const backup=JSON.parse((key&&localStorage.getItem(key))||"null");
     if(!backup||!backup.data)throw new Error("backup missing");
     const payload={app:"Personal Diary",schemaVersion:2,exportedAt:backup.savedAt||nowISO(),data:normalizeData(backup.data)};
     downloadFile("personal-diary-before-auto-sync-"+new Date().toISOString().slice(0,10)+".json","\uFEFF"+JSON.stringify(payload,null,2),"application/json;charset=utf-8");
@@ -185,7 +231,9 @@ function updateCloudPanel(){
   if(!panel)return;
   const actions=(items)=>'<div class="cloud-sync-actions">'+items.join("")+'</div>';
   const button=(action,label,klass)=>'<button type="button" class="btn '+(klass||"btn-white")+'" data-action="'+action+'">'+label+'</button>';
-  if(cloudState==="checking"){
+  if(cloudState==="disabled"){
+    panel.innerHTML='<strong>계정별 로컬 저장이 활성화되어 있어요.</strong><p>현재 기록은 로그인한 계정 전용 브라우저 저장 공간에 보관됩니다. 다른 PC와의 동기화는 다음 단계에서 서버 API 인증을 적용한 뒤 활성화합니다.</p><p class="cloud-muted">동기화를 안전하게 연결하기 전까지 중앙 서버에 기록을 보내지 않습니다.</p>';
+  }else if(cloudState==="checking"){
     panel.innerHTML='<strong>중앙 다이어리 연결 확인 중…</strong><p>이 컴퓨터의 기존 기록은 아직 변경하지 않았어요.</p>';
   }else if(cloudState==="empty"){
     const count=recordsSummary(data);
@@ -211,8 +259,9 @@ async function writeSharedDiary(candidate){
   return result;
 }
 function applySharedDiary(result){
+  const key=currentStoreKey();if(!key)throw new Error("로그인 후에만 기록을 불러올 수 있습니다.");
   data=normalizeData(result.data);
-  localStorage.setItem(STORE_KEY,JSON.stringify(data));
+  localStorage.setItem(key,JSON.stringify(data));
   cloudUpdatedAt=result.updatedAt||null;
   storeCloudBaseline(data);
   cloudState="ready";
@@ -222,73 +271,11 @@ function applySharedDiary(result){
   updateCloudPanel();
 }
 async function initializeCloudSync(){
-  cloudState="checking";
-  cloudStatusMessage="";
+  // Cloud access stays disabled until the API authenticates the Supabase session
+  // and derives the private Blob path from the verified user ID (step 5).
+  cloudState="disabled";
+  cloudStatusMessage="중앙 동기화는 API 인증 적용 후 활성화됩니다.";
   updateCloudPanel();
-  const editAtStart=lastLocalEditAt;
-  try{
-    const result=await requestSharedDiary();
-    if(!result.exists){
-      cloudState="empty";
-      cloudLastSyncedData=null;
-      updateCloudPanel();
-      return;
-    }
-    const remoteData=normalizeData(result.data);
-    const remoteComparable=comparableData(remoteData);
-    const localComparable=comparableData(data);
-    if(lastLocalEditAt!==editAtStart){
-      cloudState="conflict";
-      cloudPendingRemote={...result,data:remoteData};
-      updateCloudPanel();
-      return;
-    }
-    if(localComparable===remoteComparable){
-      applySharedDiary({...result,data:remoteData});
-      return;
-    }
-    if(cloudLastSyncedData!==null){
-      if(localComparable===cloudLastSyncedData){
-        // No local edits since the last successful sync: use the newer central copy.
-        applySharedDiary({...result,data:remoteData});
-        return;
-      }
-      if(remoteComparable===cloudLastSyncedData){
-        // Only this browser changed while offline; keep its records and queue the save.
-        cloudState="ready";
-        cloudUpdatedAt=result.updatedAt||cloudUpdatedAt;
-        cloudPendingRemote=null;
-        cloudStatusMessage="";
-        updateCloudPanel();
-        scheduleCloudWrite(0);
-        return;
-      }
-      cloudState="conflict";
-      cloudPendingRemote={...result,data:remoteData};
-      cloudStatusMessage="두 컴퓨터에서 마지막 동기화 이후 서로 다른 변경이 있어 자동 덮어쓰기를 멈췄습니다.";
-      updateCloudPanel();
-      return;
-    }
-    // Legacy browsers have no saved sync baseline. Preserve their cache before
-    // adopting the central copy, which is the only shared source between devices.
-    const localCacheWasDifferent=hasRecords(data)&&localComparable!==remoteComparable;
-    if(localCacheWasDifferent&&!preservePreSyncLocalCache()){
-      cloudState="conflict";
-      cloudPendingRemote={...result,data:remoteData};
-      cloudStatusMessage="이 컴퓨터의 기존 기록을 안전하게 백업하지 못해 중앙 기록 적용을 멈췄습니다.";
-      updateCloudPanel();
-      return;
-    }
-    applySharedDiary({...result,data:remoteData});
-    if(localCacheWasDifferent){
-      cloudStatusMessage="이전 로컬 기록은 브라우저에 백업한 뒤 중앙 기록을 불러왔습니다. 필요하면 ‘이전 로컬 기록 백업 다운로드’를 선택하세요.";
-      updateCloudPanel();
-    }
-  }catch(error){
-    cloudState="error";
-    cloudStatusMessage=error&&error.message?error.message:"요청 실패";
-    updateCloudPanel();
-  }
 }
 function scheduleCloudWrite(delay){
   if(cloudState!=="ready")return;
@@ -656,7 +643,7 @@ function exportCsv(){const columns=["자료 종류","ID","날짜","제목","본�
 function exportTxt(){const out=["Personal Diary · 전체 자료 내보내기","내보낸 시각: "+nowISO(),"","=== 계획 ("+data.plans.length+") ==="];data.plans.forEach(p=>out.push("["+p.title+"]","ID: "+p.id,"분류: "+p.category,"상태: "+p.status,"우선순위: "+priorityNumber(p.priority),"기간: "+(p.startDate||"미정")+" ~ "+(p.endDate||"미정"),"예상 시간: "+fmtMinutes(p.estimatedMinutes),"설명: "+(p.description||""),"성공 기준: "+(p.successCriteria||""),"변경 이력: "+JSON.stringify(p.history||[]),""));out.push("=== 할 일 ("+data.tasks.length+") ===");data.tasks.forEach(t=>out.push("["+t.title+"]","ID: "+t.id,"계획: "+planLabel(t.planId),"상태: "+statusLabel(t.status),"저장 순서 번호: "+t.sequenceNo,"마감: "+(t.dueDate||"미정"),"예상 시간: "+fmtMinutes(t.estimatedMinutes),"태그: "+(t.tags||[]).join(", "),"설명: "+(t.description||""),"생성: "+(t.createdAt||""),"완료: "+(t.completedAt||"미완료"),""));out.push("=== 실행 기록 ("+data.runs.length+") ===");data.runs.forEach(r=>out.push("["+(r.title||r.taskTitleSnapshot||"실행 기록")+"]","ID: "+r.id,"시작: "+(r.startedAt||""),"종료: "+(r.endedAt||""),"실행 시간: "+fmtMinutes(r.durationMinutes),"연결 할 일: "+(r.taskTitleSnapshot||"독립 기록"),"막힌 부분: "+(r.blocker||""),"메모: "+(r.note||""),""));out.push("=== 완료 이력 ("+data.completionEvents.length+") ===");data.completionEvents.forEach(e=>out.push("- "+e.taskTitleSnapshot+" / 완료: "+e.at+" / 주기: "+e.cycleKey));out.push("","=== 일기 ("+(data.entries||[]).length+") ===");(data.entries||[]).forEach(e=>out.push("["+e.date+"] "+e.title,"기분: "+e.mood,"태그: "+(e.tags||[]).join(", "),"ID: "+e.id,e.content,""));downloadFile("personal-diary-all-data-"+new Date().toISOString().slice(0,10)+".txt","\uFEFF"+out.join("\n"),"text/plain;charset=utf-8");showToast("전체 자료를 TXT 파일로 저장했어요.")}
 function exportData(){const payload={app:"Personal Diary",schemaVersion:2,exportedAt:nowISO(),data:{plans:data.plans,tasks:data.tasks,runs:data.runs,completionEvents:data.completionEvents,entries:data.entries||[]}};const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="personal-diary-backup-"+new Date().toISOString().slice(0,10)+".json";a.click();URL.revokeObjectURL(url);showToast("계획·할 일·일기·실행 기록을 포함한 전체 백업을 내려받았어요.")}
 function importDataFile(file){if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(String(reader.result||""));const d=parsed.data||parsed;if(!d||typeof d!=="object"||!Array.isArray(d.plans)||!Array.isArray(d.tasks)||!Array.isArray(d.runs)||!Array.isArray(d.completionEvents))throw new Error("wrong schema");if(!confirm("현재 다이어리 데이터를 백업 파일의 내용으로 바꿀까요? 현재 상태를 먼저 내보내기 해두세요."))return;data=normalizeData(d);save();render();showToast("백업 데이터를 불러왔어요.")}catch(e){showToast("유효한 Personal Diary 백업 파일이 아니에요.")}};reader.readAsText(file)}
-function handleAction(el){const a=el.dataset.action,tid=el.dataset.id;if(!a)return;if(a==="new-journal")openJournalForm();else if(a==="edit-journal")openJournalForm(tid);else if(a==="delete-journal"){const entry=data.entries.find(x=>x.id===tid);if(entry&&confirm("“"+entry.title+"” 일기를 삭제할까요?")){data.entries=data.entries.filter(x=>x.id!==tid);save();render();showToast("일기를 삭제했어요.")}}else if(a==="new-plan")openPlanForm();else if(a==="edit-plan")openPlanForm(tid);else if(a==="plan-history")showPlanHistory(tid);else if(a==="review-plan-tasks"){openReviewTaskDetails(el.dataset.plan||"",el.dataset.status)}else if(a==="new-task")openTaskForm("",el.dataset.plan||"");else if(a==="edit-task")openTaskForm(tid);else if(a==="complete-task")completeTask(tid);else if(a==="reopen-task")reopenTask(tid);else if(a==="delete-task"){const t=getTask(tid);if(t&&confirm("“"+t.title+"” 할 일을 삭제할까요? 실행 기록은 남겨두고 할 일만 목록에서 삭제합니다.")){data.tasks=data.tasks.filter(x=>x.id!==tid);data.runs.forEach(r=>{if(r.taskId===tid){r.taskTitleSnapshot=r.taskTitleSnapshot||t.title;r.taskId=null}});save();render();showToast("할 일을 삭제했어요. 관련 실행 기록은 보존했어요.")}}else if(a==="new-run")openRunForm(el.dataset.task||"");else if(a==="delete-run"){if(confirm("이 실행 기록을 삭제할까요?")){data.runs=data.runs.filter(r=>r.id!==tid);save();render();showToast("실행 기록을 삭제했어요.")}}else if(a==="close-modal"){closeModal()}else if(a==="export-data")exportData();else if(a==="export-csv")exportCsv();else if(a==="export-txt")exportTxt();else if(a==="toggle-priority-picker"){const picker=el.closest("[data-priority-picker]");if(picker){const menu=picker.querySelector(".number-picker-menu"),trigger=picker.querySelector(".number-picker-trigger"),opening=menu.classList.contains("hide");document.querySelectorAll(".number-picker-menu").forEach(m=>m.classList.add("hide"));document.querySelectorAll(".number-picker-trigger").forEach(b=>b.setAttribute("aria-expanded","false"));if(opening){menu.classList.remove("hide");trigger.setAttribute("aria-expanded","true");const formValue=picker.querySelector('input[name="priority"]')?.value;const current=formValue||(priorityFilter==="all"?"":priorityFilter);const selected=current?menu.querySelector('[data-value="'+current+'"]'):null;if(selected)menu.scrollTop=Math.max(0,selected.offsetTop-2*selected.offsetHeight)}}else{} }else if(a==="set-priority-value"){const picker=el.closest("[data-priority-picker]");if(picker){const value=String(normalizePriority(el.dataset.value)),input=picker.querySelector('input[name="priority"]'),label=picker.querySelector("[data-selected-label]");if(input)input.value=value;if(label)label.textContent=value;picker.querySelector(".number-picker-menu").classList.add("hide");picker.querySelector(".number-picker-trigger").setAttribute("aria-expanded","false")}}else if(a==="set-priority-filter"){priorityFilter=el.dataset.value==="all"?"all":String(normalizePriority(el.dataset.value));render()}else if(a==="import-data")document.getElementById("importInput").click();else if(a==="cloud-upload-local")uploadLocalDiaryToCloud(false);else if(a==="cloud-pull")pullSharedDiary();else if(a==="cloud-retry")initializeCloudSync();else if(a==="cloud-retry-save")scheduleCloudWrite(0);else if(a==="cloud-download-pre-sync-backup")downloadPreSyncLocalBackup();else if(a==="cloud-use-remote")usePendingCloudDiary();else if(a==="cloud-overwrite-remote")overwriteCloudWithLocal();else if(a==="show-storage-note")showModal("저장 방식 안내 🔒","현재 버전의 데이터 보관에 대해 알아두세요.",'<div class="hint-box">현재 과제용 버전은 Vercel Blob 중앙 저장소를 통해 여러 컴퓨터의 기록을 공유합니다. 최초에는 기존 기록이 있는 컴퓨터에서 “이 컴퓨터의 기존 기록을 중앙에 처음 업로드”를 눌러야 합니다.</div><div class="history-diff" style="margin-top:12px">로그인 기능이 아직 없으므로 사이트 방문자는 누구나 중앙 기록을 읽고 수정할 수 있습니다. 실제 개인정보는 넣지 말고 JSON 백업을 주기적으로 보관하세요. 다른 컴퓨터에서 변경된 내용은 자동으로 반영됩니다. 중요한 기록은 JSON 백업으로 보관하세요.</div>','확인','history')}
+function handleAction(el){const a=el.dataset.action,tid=el.dataset.id;if(!a)return;if(a==="sign-out"){void performSignOut()}else if(a==="new-journal")openJournalForm();else if(a==="edit-journal")openJournalForm(tid);else if(a==="delete-journal"){const entry=data.entries.find(x=>x.id===tid);if(entry&&confirm("“"+entry.title+"” 일기를 삭제할까요?")){data.entries=data.entries.filter(x=>x.id!==tid);save();render();showToast("일기를 삭제했어요.")}}else if(a==="new-plan")openPlanForm();else if(a==="edit-plan")openPlanForm(tid);else if(a==="plan-history")showPlanHistory(tid);else if(a==="review-plan-tasks"){openReviewTaskDetails(el.dataset.plan||"",el.dataset.status)}else if(a==="new-task")openTaskForm("",el.dataset.plan||"");else if(a==="edit-task")openTaskForm(tid);else if(a==="complete-task")completeTask(tid);else if(a==="reopen-task")reopenTask(tid);else if(a==="delete-task"){const t=getTask(tid);if(t&&confirm("“"+t.title+"” 할 일을 삭제할까요? 실행 기록은 남겨두고 할 일만 목록에서 삭제합니다.")){data.tasks=data.tasks.filter(x=>x.id!==tid);data.runs.forEach(r=>{if(r.taskId===tid){r.taskTitleSnapshot=r.taskTitleSnapshot||t.title;r.taskId=null}});save();render();showToast("할 일을 삭제했어요. 관련 실행 기록은 보존했어요.")}}else if(a==="new-run")openRunForm(el.dataset.task||"");else if(a==="delete-run"){if(confirm("이 실행 기록을 삭제할까요?")){data.runs=data.runs.filter(r=>r.id!==tid);save();render();showToast("실행 기록을 삭제했어요.")}}else if(a==="close-modal"){closeModal()}else if(a==="export-data")exportData();else if(a==="export-csv")exportCsv();else if(a==="export-txt")exportTxt();else if(a==="toggle-priority-picker"){const picker=el.closest("[data-priority-picker]");if(picker){const menu=picker.querySelector(".number-picker-menu"),trigger=picker.querySelector(".number-picker-trigger"),opening=menu.classList.contains("hide");document.querySelectorAll(".number-picker-menu").forEach(m=>m.classList.add("hide"));document.querySelectorAll(".number-picker-trigger").forEach(b=>b.setAttribute("aria-expanded","false"));if(opening){menu.classList.remove("hide");trigger.setAttribute("aria-expanded","true");const formValue=picker.querySelector('input[name="priority"]')?.value;const current=formValue||(priorityFilter==="all"?"":priorityFilter);const selected=current?menu.querySelector('[data-value="'+current+'"]'):null;if(selected)menu.scrollTop=Math.max(0,selected.offsetTop-2*selected.offsetHeight)}}else{} }else if(a==="set-priority-value"){const picker=el.closest("[data-priority-picker]");if(picker){const value=String(normalizePriority(el.dataset.value)),input=picker.querySelector('input[name="priority"]'),label=picker.querySelector("[data-selected-label]");if(input)input.value=value;if(label)label.textContent=value;picker.querySelector(".number-picker-menu").classList.add("hide");picker.querySelector(".number-picker-trigger").setAttribute("aria-expanded","false")}}else if(a==="set-priority-filter"){priorityFilter=el.dataset.value==="all"?"all":String(normalizePriority(el.dataset.value));render()}else if(a==="import-data")document.getElementById("importInput").click();else if(a==="cloud-upload-local")uploadLocalDiaryToCloud(false);else if(a==="cloud-pull")pullSharedDiary();else if(a==="cloud-retry")initializeCloudSync();else if(a==="cloud-retry-save")scheduleCloudWrite(0);else if(a==="cloud-download-pre-sync-backup")downloadPreSyncLocalBackup();else if(a==="cloud-use-remote")usePendingCloudDiary();else if(a==="cloud-overwrite-remote")overwriteCloudWithLocal();else if(a==="show-storage-note")showModal("저장 방식 안내 🔒","현재 버전의 데이터 보관에 대해 알아두세요.",'<div class="hint-box">현재 과제용 버전은 Vercel Blob 중앙 저장소를 통해 여러 컴퓨터의 기록을 공유합니다. 최초에는 기존 기록이 있는 컴퓨터에서 “이 컴퓨터의 기존 기록을 중앙에 처음 업로드”를 눌러야 합니다.</div><div class="history-diff" style="margin-top:12px">로그인 기능이 아직 없으므로 사이트 방문자는 누구나 중앙 기록을 읽고 수정할 수 있습니다. 실제 개인정보는 넣지 말고 JSON 백업을 주기적으로 보관하세요. 다른 컴퓨터에서 변경된 내용은 자동으로 반영됩니다. 중요한 기록은 JSON 백업으로 보관하세요.</div>','확인','history')}
 document.addEventListener("click",e=>{const nav=e.target.closest("[data-page]");if(nav){setPage(nav.dataset.page);return}const action=e.target.closest("[data-action]");if(action){if(action.dataset.action==="close-modal"&&action.classList.contains("modal-backdrop")&&e.target!==action)return;handleAction(action)}});
 window.addEventListener("popstate",e=>{
   const s=e.state;
@@ -676,6 +663,142 @@ updateCloudPanel();
 initializeCloudSync();
 setInterval(pollSharedDiary,4000);
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)pollSharedDiary()});
+
+function setAuthMessage(message,isError){
+  const el=document.getElementById("authMessage");
+  if(el){el.textContent=message||"";el.style.color=isError?"#a33b38":"#6e6696";}
+}
+function setAuthMode(mode){
+  authMode=mode==="signup"?"signup":"signin";
+  const signup=authMode==="signup";
+  document.getElementById("authTitle").textContent=signup?"새 계정 만들기":"다이어리에 로그인";
+  document.getElementById("authDescription").textContent=signup?"이메일과 비밀번호로 개인 다이어리 계정을 만드세요.":"내 계정으로 로그인해 개인 기록을 열어보세요.";
+  document.getElementById("authSubmit").textContent=signup?"회원가입":"로그인";
+  document.getElementById("authModeToggle").textContent=signup?"이미 계정이 있으신가요? 로그인":"계정이 없으신가요? 회원가입";
+  document.getElementById("authPassword").setAttribute("autocomplete",signup?"new-password":"current-password");
+  setAuthMessage("");
+}
+function showAuthGate(message,isError){
+  const gate=document.getElementById("authGate");
+  if(gate)gate.classList.remove("hidden");
+  const controls=document.getElementById("accountControls");
+  if(controls)controls.classList.add("hide");
+  if(message)setAuthMessage(message,!!isError);
+}
+async function handleAuthSession(session){
+  const nextUser=session&&session.user?session.user:null;
+  if(nextUser&&activeUser&&nextUser.id===activeUser.id){
+    document.getElementById("authGate").classList.add("hidden");
+    document.getElementById("accountControls").classList.remove("hide");
+    document.getElementById("signedInEmail").textContent=nextUser.email||"로그인됨";
+    return;
+  }
+  if(!nextUser&&!activeUser){
+    showAuthGate();
+    return;
+  }
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer=null;
+  cloudPendingRemote=null;
+  cloudSaveInFlight=false;
+  cloudState="disabled";
+  cloudUpdatedAt=null;
+  cloudStatusMessage="중앙 동기화는 API 인증 적용 후 활성화됩니다.";
+  activeUser=nextUser;
+  if(!activeUser){
+    data=blank();
+    cloudLastSyncedData=null;
+    showAuthGate();
+    updateCloudPanel();
+    return;
+  }
+  const scopedKey=currentStoreKey();
+  const reviewKey=userStorageKey("-legacy-import-reviewed");
+  try{
+    if(!localStorage.getItem(scopedKey)&&!localStorage.getItem(reviewKey)){
+      const legacyRaw=localStorage.getItem(STORE_KEY);
+      if(legacyRaw){
+        let legacyData=blank();
+        try{legacyData=normalizeData(JSON.parse(legacyRaw))}catch(error){}
+        if(hasRecords(legacyData)){
+          const importLegacy=confirm("이 브라우저에서 로그인 기능 도입 전의 기록을 찾았습니다. 이 기록이 현재 계정 소유자의 기록이 맞을 때만 확인을 눌러 이 계정에 복사하세요. 기존 원본 기록은 삭제하지 않습니다. 가져오시겠습니까?");
+          if(importLegacy)localStorage.setItem(scopedKey,JSON.stringify(legacyData));
+        }
+        localStorage.setItem(reviewKey,"1");
+      }
+    }
+    data=loadData();
+  }catch(error){
+    data=blank();
+    showToast("이 계정의 로컬 기록을 읽지 못했습니다. 브라우저 저장 공간을 확인해 주세요.");
+  }
+  cloudLastSyncedData=readStoredCloudBaseline();
+  lastLocalEditAt=0;
+  document.getElementById("authGate").classList.add("hidden");
+  document.getElementById("accountControls").classList.remove("hide");
+  document.getElementById("signedInEmail").textContent=activeUser.email||"로그인됨";
+  setPage("home");
+  updateCloudPanel();
+}
+async function performSignOut(){
+  if(!authClient)return;
+  const {error}=await authClient.auth.signOut();
+  if(error)showToast("로그아웃하지 못했습니다: "+error.message);
+}
+async function initializeSupabaseAuth(){
+  const emailEnabledMessage="Supabase Auth 연결을 확인할 수 없습니다. 페이지를 새로고침하거나 설정을 확인해 주세요.";
+  document.getElementById("authModeToggle").addEventListener("click",()=>setAuthMode(authMode==="signin"?"signup":"signin"));
+  document.getElementById("authForm").addEventListener("submit",async event=>{
+    event.preventDefault();
+    if(authBusy)return;
+    if(!authClient){setAuthMessage(emailEnabledMessage,true);return;}
+    const email=document.getElementById("authEmail").value.trim();
+    const password=document.getElementById("authPassword").value;
+    if(authMode==="signup"&&password.length<8){setAuthMessage("보안을 위해 비밀번호는 8자 이상으로 입력해 주세요.",true);return;}
+    authBusy=true;
+    const submit=document.getElementById("authSubmit");
+    submit.disabled=true;
+    submit.textContent=authMode==="signup"?"가입 처리 중…":"로그인 중…";
+    setAuthMessage("");
+    try{
+      if(authMode==="signup"){
+        const {data:result,error}=await authClient.auth.signUp({email,password,options:{emailRedirectTo:window.location.origin}});
+        if(error)throw error;
+        if(result.session){
+          await handleAuthSession(result.session);
+          showToast("회원가입이 완료되었습니다.");
+        }else{
+          setAuthMessage("가입 요청이 접수되었습니다. 이메일 받은편지함에서 확인 링크를 누른 뒤 로그인해 주세요.");
+        }
+      }else{
+        const {data:result,error}=await authClient.auth.signInWithPassword({email,password});
+        if(error)throw error;
+        if(result.session)await handleAuthSession(result.session);
+      }
+    }catch(error){
+      setAuthMessage(error&&error.message?error.message:"인증 요청에 실패했습니다.",true);
+    }finally{
+      authBusy=false;
+      submit.disabled=false;
+      submit.textContent=authMode==="signup"?"회원가입":"로그인";
+    }
+  });
+  if(!window.supabase||typeof window.supabase.createClient!=="function"){
+    showAuthGate(emailEnabledMessage,true);
+    return;
+  }
+  authClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
+  authClient.auth.onAuthStateChange((_event,session)=>{void handleAuthSession(session)});
+  try{
+    const {data:result,error}=await authClient.auth.getSession();
+    if(error)throw error;
+    await handleAuthSession(result.session);
+  }catch(error){
+    showAuthGate("Supabase에 연결하지 못했습니다. 인터넷 연결과 인증 설정을 확인해 주세요. "+(error&&error.message?error.message:""),true);
+  }
+}
+
+void initializeSupabaseAuth();
 })();
 </script>
 </body>
