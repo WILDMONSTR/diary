@@ -132,7 +132,7 @@ body{background-color:var(--canvas);background-image:radial-gradient(#ded9ce .65
 <main class="main">
     <header class="topbar"><div><div class="eyebrow" id="eyebrow">YOUR PERSONAL SPACE</div><h1 class="page-title" id="pageTitle">오늘도, 나답게 ✨</h1><p class="page-sub" id="pageSub">생각을 정리하고 작은 성취를 모아보세요.</p></div><div class="top-actions"><div class="account-controls hide" id="accountControls"><span class="account-email" id="signedInEmail"></span><button type="button" class="btn btn-white btn-small" data-action="sign-out">로그아웃</button></div><div class="today-pill" id="todayPill"></div><button class="btn btn-primary" data-action="new-task">＋ 새 할 일</button></div></header>
   <section id="appContent"></section>
-  <div class="footer-note">당신의 속도로, 당신의 이야기를 기록해요 ✿</div><p class="privacy-warning">현재 단계에서는 로그인한 계정별로 이 브라우저에 기록을 분리해 저장합니다. 중앙 동기화는 API 인증과 사용자별 서버 저장소 적용 후 활성화됩니다. 중요한 기록은 JSON 백업으로 보관하세요.</p>
+  <div class="footer-note">당신의 속도로, 당신의 이야기를 기록해요 ✿</div><p class="privacy-warning">로그인한 계정의 기록은 비공개 중앙 저장소와 동기화됩니다. 다른 계정의 데이터와 분리되며, 같은 계정의 다른 기기는 자동 동기화됩니다. 중요한 기록은 JSON 백업으로 보관하세요.</p>
 </main>
 </div>
 <div id="modalRoot"></div><div id="toastRoot" aria-live="polite"></div>
@@ -232,32 +232,47 @@ function updateCloudPanel(){
   const actions=(items)=>'<div class="cloud-sync-actions">'+items.join("")+'</div>';
   const button=(action,label,klass)=>'<button type="button" class="btn '+(klass||"btn-white")+'" data-action="'+action+'">'+label+'</button>';
   if(cloudState==="disabled"){
-    panel.innerHTML='<strong>계정별 로컬 저장이 활성화되어 있어요.</strong><p>현재 기록은 로그인한 계정 전용 브라우저 저장 공간에 보관됩니다. 다른 PC와의 동기화는 다음 단계에서 서버 API 인증을 적용한 뒤 활성화합니다.</p><p class="cloud-muted">동기화를 안전하게 연결하기 전까지 중앙 서버에 기록을 보내지 않습니다.</p>';
+    panel.innerHTML='<strong>로그인 후 계정별로 저장합니다.</strong><p>로그인한 계정만 자신의 기록을 읽고 수정할 수 있습니다.</p><p class="cloud-muted">로그아웃 상태에서는 다이어리 데이터가 표시되지 않습니다.</p>';
   }else if(cloudState==="checking"){
-    panel.innerHTML='<strong>중앙 다이어리 연결 확인 중…</strong><p>이 컴퓨터의 기존 기록은 아직 변경하지 않았어요.</p>';
+    panel.innerHTML='<strong>내 계정의 중앙 저장소를 확인 중…</strong><p>이 브라우저의 기존 기록은 아직 덮어쓰지 않았어요.</p>';
   }else if(cloudState==="empty"){
     const count=recordsSummary(data);
-    panel.innerHTML='<strong>중앙 저장소가 아직 비어 있어요.</strong><p>'+(count>0?'이 컴퓨터에 계획·할 일·기록 '+count+'개가 있습니다. 기존 기록이 있는 A 컴퓨터에서 한 번만 업로드하세요.':'기존 기록이 있는 A 컴퓨터에서 먼저 중앙 저장소를 초기화해야 합니다.')+'</p><p class="cloud-muted">로그인 없이 공개되는 과제용 저장소입니다. 누구나 기록을 읽고 수정할 수 있으니 민감한 정보는 넣지 마세요.</p>'+(count>0?actions([button("cloud-upload-local","이 컴퓨터의 기존 기록을 중앙에 처음 업로드","btn-primary")]):"");
+    panel.innerHTML='<strong>이 계정의 중앙 저장소가 아직 비어 있어요.</strong><p>'+(count>0?'이 브라우저에 기록 '+count+'개가 있습니다. 이 기록을 이 계정의 중앙 저장소에 처음 업로드할 수 있어요.':'새 기록을 만들면 이 계정의 중앙 저장소에 자동 저장됩니다.')+'</p><p class="cloud-muted">기존 로컬 기록은 업로드를 확인하기 전까지 자동으로 서버에 보내지 않습니다.</p>'+(count>0?actions([button("cloud-upload-local","이 계정의 기존 기록을 처음 업로드","btn-primary")]):"");
   }else if(cloudState==="ready"){
-    panel.innerHTML='<strong>중앙 동기화 연결됨 ✓</strong><p>이 컴퓨터의 변경 사항은 자동 저장됩니다. 다른 컴퓨터의 변경 사항도 약 4초마다 자동으로 확인해 반영합니다. 별도로 “중앙 기록 새로고침”을 누르지 않아도 됩니다.</p><p class="cloud-muted">로그인 없이 누구나 조회·수정할 수 있습니다. 두 컴퓨터에서 동시에 수정하면 기록을 덮어쓰지 않고 선택 안내를 표시합니다.</p>'+(cloudSaveInFlight||cloudSaveTimer?'<p>중앙 저장 중…</p>':(cloudStatusMessage?'<p class="cloud-error">'+esc(cloudStatusMessage)+'</p>':''))+actions([button("cloud-pull","중앙 기록 새로고침","btn-white")].concat(hasPreSyncBackup()?[button("cloud-download-pre-sync-backup","이전 로컬 기록 백업 다운로드","btn-white")]:[]).concat(cloudStatusMessage?[button("cloud-retry-save","현재 기록 다시 저장","btn-primary")]:[]));
+    const extraButtons=[];
+    if(hasPreSyncBackup())extraButtons.push(button("cloud-download-pre-sync-backup","이전 로컬 기록 백업 다운로드","btn-white"));
+    if(cloudStatusMessage)extraButtons.push(button("cloud-retry-save","현재 기록 다시 저장","btn-primary"));
+    panel.innerHTML='<strong>내 계정의 중앙 동기화 연결됨 ✓</strong><p>이 계정의 기록은 자동 저장되고, 같은 계정으로 로그인한 다른 기기의 변경 사항도 약 4초마다 자동으로 확인해 반영합니다.</p><p class="cloud-muted">다른 계정의 기록에는 접근하지 않습니다. 동시에 서로 다른 변경이 생기면 자동 덮어쓰기를 멈추고 선택을 요청합니다.</p>'+(cloudSaveInFlight||cloudSaveTimer?'<p>중앙 저장 중…</p>':(cloudStatusMessage?'<p class="cloud-error">'+esc(cloudStatusMessage)+'</p>':''))+(extraButtons.length?actions(extraButtons):"");
   }else if(cloudState==="conflict"){
-    panel.innerHTML='<strong>이 컴퓨터와 중앙 기록이 서로 달라요.</strong><p>기록을 자동으로 덮어쓰지 않았습니다. 먼저 로컬 기록을 백업한 뒤 어느 쪽을 사용할지 선택하세요.</p><p class="cloud-muted">“중앙 기록 사용”은 이 컴퓨터의 기록을 JSON 파일로 백업하고 중앙 기록을 불러옵니다. “이 컴퓨터 기록 업로드”는 중앙의 모든 기록을 덮어씁니다.</p>'+actions([button("cloud-use-remote","중앙 기록 사용","btn-white"),button("cloud-overwrite-remote","이 컴퓨터 기록으로 중앙 덮어쓰기","btn-primary")]);
+    panel.innerHTML='<strong>이 브라우저와 이 계정의 중앙 기록이 서로 달라요.</strong><p>안전을 위해 자동으로 덮어쓰지 않았습니다. 먼저 필요한 경우 JSON 백업을 보관한 뒤 어느 쪽을 사용할지 선택하세요.</p><p class="cloud-muted">“중앙 계정 기록 사용”은 이 브라우저의 기록을 백업한 뒤 중앙 기록을 불러옵니다. “이 브라우저 기록 업로드”는 이 계정의 중앙 기록을 덮어씁니다.</p>'+actions([button("cloud-use-remote","중앙 계정 기록 사용","btn-white"),button("cloud-overwrite-remote","이 브라우저 기록 업로드","btn-primary")]);
   }else{
-    panel.innerHTML='<strong class="cloud-error">중앙 저장소에 연결하지 못했어요.</strong><p>'+esc(cloudStatusMessage||"Blob 연결 또는 배포 설정을 확인해 주세요.")+'</p><p class="cloud-muted">이 컴퓨터의 기록은 localStorage에 남아 있습니다. 연결이 확인될 때까지 페이지 데이터를 지우지 마세요.</p>'+actions([button("cloud-retry","연결 다시 확인","btn-primary"),button("export-data","JSON 백업 다운로드","btn-white")]);
+    panel.innerHTML='<strong class="cloud-error">내 계정의 중앙 저장소에 연결하지 못했어요.</strong><p>'+esc(cloudStatusMessage||"인증 세션이나 Blob 연결 설정을 확인해 주세요.")+'</p><p class="cloud-muted">이 계정의 브라우저 기록은 localStorage에 남아 있습니다. 연결이 확인될 때까지 사이트 데이터를 지우지 마세요.</p>'+actions([button("cloud-retry","연결 다시 확인","btn-primary"),button("export-data","JSON 백업 다운로드","btn-white")]);
   }
 }
+
+async function getCurrentAccessToken(){
+  if(!authClient||!activeUser)throw new Error("먼저 로그인해 주세요.");
+  const {data:sessionData,error}=await authClient.auth.getSession();
+  if(error)throw new Error(error.message||"로그인 세션을 확인하지 못했습니다.");
+  const token=sessionData&&sessionData.session&&sessionData.session.access_token;
+  if(!token)throw new Error("로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
+  return token;
+}
 async function requestSharedDiary(){
-  const response=await fetch("/api/diary?ts="+Date.now(),{method:"GET",cache:"no-store",headers:{"Accept":"application/json"}});
+  const token=await getCurrentAccessToken();
+  const response=await fetch("/api/diary?ts="+Date.now(),{method:"GET",cache:"no-store",headers:{"Accept":"application/json","Authorization":"Bearer "+token}});
   const result=await response.json().catch(()=>({}));
   if(!response.ok||!result.ok)throw new Error(result.error||("HTTP "+response.status));
   return result;
 }
 async function writeSharedDiary(candidate){
-  const response=await fetch("/api/diary",{method:"PUT",cache:"no-store",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({data:candidate})});
+  const token=await getCurrentAccessToken();
+  const response=await fetch("/api/diary",{method:"PUT",cache:"no-store",headers:{"Content-Type":"application/json","Accept":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({data:candidate})});
   const result=await response.json().catch(()=>({}));
   if(!response.ok||!result.ok)throw new Error(result.error||("HTTP "+response.status));
   return result;
 }
+
 function applySharedDiary(result){
   const key=currentStoreKey();if(!key)throw new Error("로그인 후에만 기록을 불러올 수 있습니다.");
   data=normalizeData(result.data);
@@ -271,12 +286,87 @@ function applySharedDiary(result){
   updateCloudPanel();
 }
 async function initializeCloudSync(){
-  // Cloud access stays disabled until the API authenticates the Supabase session
-  // and derives the private Blob path from the verified user ID (step 5).
-  cloudState="disabled";
-  cloudStatusMessage="중앙 동기화는 API 인증 적용 후 활성화됩니다.";
+  if(!activeUser){
+    cloudState="disabled";
+    cloudStatusMessage="";
+    updateCloudPanel();
+    return;
+  }
+  cloudState="checking";
+  cloudStatusMessage="";
   updateCloudPanel();
+  const editAtStart=lastLocalEditAt;
+  try{
+    const result=await requestSharedDiary();
+    if(!result.exists){
+      cloudUpdatedAt=null;
+      cloudPendingRemote=null;
+      if(hasRecords(data)){
+        cloudState="empty";
+        cloudLastSyncedData=null;
+        updateCloudPanel();
+      }else{
+        cloudState="ready";
+        cloudLastSyncedData=comparableData(blank());
+        storeCloudBaseline(blank());
+        cloudStatusMessage="";
+        updateCloudPanel();
+      }
+      return;
+    }
+    const remoteData=normalizeData(result.data);
+    const remoteComparable=comparableData(remoteData);
+    const localComparable=comparableData(data);
+    if(lastLocalEditAt!==editAtStart){
+      cloudState="conflict";
+      cloudPendingRemote={...result,data:remoteData};
+      updateCloudPanel();
+      return;
+    }
+    if(localComparable===remoteComparable){
+      applySharedDiary({...result,data:remoteData});
+      return;
+    }
+    if(cloudLastSyncedData!==null){
+      if(localComparable===cloudLastSyncedData){
+        applySharedDiary({...result,data:remoteData});
+        return;
+      }
+      if(remoteComparable===cloudLastSyncedData){
+        cloudState="ready";
+        cloudUpdatedAt=result.updatedAt||cloudUpdatedAt;
+        cloudPendingRemote=null;
+        cloudStatusMessage="";
+        updateCloudPanel();
+        scheduleCloudWrite(0);
+        return;
+      }
+      cloudState="conflict";
+      cloudPendingRemote={...result,data:remoteData};
+      cloudStatusMessage="이 계정의 여러 기기에서 마지막 동기화 이후 서로 다른 변경이 있어 자동 덮어쓰기를 멈췄습니다.";
+      updateCloudPanel();
+      return;
+    }
+    const localCacheWasDifferent=hasRecords(data)&&localComparable!==remoteComparable;
+    if(localCacheWasDifferent&&!preservePreSyncLocalCache()){
+      cloudState="conflict";
+      cloudPendingRemote={...result,data:remoteData};
+      cloudStatusMessage="이 브라우저의 기존 기록을 안전하게 백업하지 못해 중앙 기록 적용을 멈췄습니다.";
+      updateCloudPanel();
+      return;
+    }
+    applySharedDiary({...result,data:remoteData});
+    if(localCacheWasDifferent){
+      cloudStatusMessage="이 브라우저의 이전 로컬 기록은 별도 백업으로 보관했습니다.";
+      updateCloudPanel();
+    }
+  }catch(error){
+    cloudState="error";
+    cloudStatusMessage=error&&error.message?error.message:"요청 실패";
+    updateCloudPanel();
+  }
 }
+
 function scheduleCloudWrite(delay){
   if(cloudState!=="ready")return;
   clearTimeout(cloudSaveTimer);
@@ -292,10 +382,13 @@ function scheduleCloudWrite(delay){
       if(cloudLastSyncedData!==null){
         const latest=await requestSharedDiary();
         if(!latest.exists){
-          cloudState="error";
-          cloudStatusMessage="중앙 저장소를 확인할 수 없습니다. 이 컴퓨터의 기록은 그대로 보존했습니다.";
-          return;
-        }
+          if(cloudLastSyncedData!==comparableData(blank())){
+            cloudState="error";
+            cloudStatusMessage="이 계정의 중앙 기록이 사라졌습니다. 기존 기록을 덮어쓰지 않았습니다.";
+            return;
+          }
+          // The confirmed baseline is empty, so allow this account's first autosave.
+        }else{
         const latestData=normalizeData(latest.data);
         const latestComparable=comparableData(latestData);
         if(latestComparable!==cloudLastSyncedData){
@@ -316,6 +409,7 @@ function scheduleCloudWrite(delay){
           return;
         }
         cloudUpdatedAt=latest.updatedAt||cloudUpdatedAt;
+        }
       }
       const result=await writeSharedDiary(snapshot);
       cloudUpdatedAt=result.updatedAt||cloudUpdatedAt;
@@ -340,9 +434,10 @@ async function pollSharedDiary(){
     const result=await requestSharedDiary();
     if(!result.exists){
       if(cloudState==="empty")return;
+      if(cloudState==="ready"&&cloudLastSyncedData===comparableData(blank()))return;
       if(cloudState==="ready"){
         cloudState="error";
-        cloudStatusMessage="중앙 저장소를 확인할 수 없습니다. 이 컴퓨터의 기록은 그대로 보존했습니다.";
+        cloudStatusMessage="이 계정의 중앙 기록을 확인할 수 없습니다. 이 브라우저의 기록은 그대로 보존했습니다.";
         updateCloudPanel();
       }else{
         cloudState="empty";
@@ -399,8 +494,8 @@ async function uploadLocalDiaryToCloud(overwrite){
   if(cloudState!=="empty"&&!overwrite)return;
   if(!overwrite&&!hasRecords(data)){showToast("업로드할 기존 기록이 없습니다.");return}
   const prompt=overwrite
-    ?"중앙 저장소의 전체 기록을 이 컴퓨터의 기록으로 교체합니다. 중앙의 다른 기록은 사라집니다. 계속할까요?"
-    :"중앙 저장소는 비어 있습니다. 이 컴퓨터의 기존 기록을 공유 다이어리의 최초 기록으로 업로드할까요? 업로드 뒤에는 사이트 방문자 누구나 이 기록을 읽고 수정할 수 있습니다.";
+    ?"이 계정의 중앙 기록을 이 브라우저의 기록으로 교체합니다. 이 계정의 다른 기기에서 아직 동기화하지 않은 변경 사항은 사라질 수 있습니다. JSON 백업을 확인했고 계속할까요?"
+    :"이 브라우저의 기존 기록을 현재 로그인한 계정의 중앙 저장소에 처음 업로드할까요? 다른 계정의 기록은 변경하지 않습니다.";
   if(!confirm(prompt))return;
   try{
     const result=await writeSharedDiary(data);
@@ -410,7 +505,7 @@ async function uploadLocalDiaryToCloud(overwrite){
     cloudPendingRemote=null;
     cloudStatusMessage="";
     updateCloudPanel();
-    showToast("기록을 중앙 저장소에 업로드했습니다.");
+    showToast("이 계정의 기록을 중앙 저장소에 업로드했습니다.");
   }catch(error){
     cloudStatusMessage=error&&error.message?error.message:"업로드 실패";
     updateCloudPanel();
@@ -453,7 +548,7 @@ async function usePendingCloudDiary(){
 }
 async function overwriteCloudWithLocal(){
   if(!cloudPendingRemote)return;
-  const prompt="현재 컴퓨터의 모든 기록으로 중앙 다이어리 전체를 교체합니다. 다른 컴퓨터에서 작성된 중앙 기록은 사라집니다. 계속할까요?";
+  const prompt="이 브라우저의 기록으로 이 계정의 중앙 기록을 교체합니다. 같은 계정의 다른 기기에서 아직 동기화하지 않은 변경 사항은 사라질 수 있습니다. JSON 백업을 확인했고 계속할까요?";
   if(!confirm(prompt))return;
   try{
     const result=await writeSharedDiary(data);
@@ -463,7 +558,7 @@ async function overwriteCloudWithLocal(){
     cloudPendingRemote=null;
     cloudStatusMessage="";
     updateCloudPanel();
-    showToast("이 컴퓨터의 기록을 중앙에 업로드했습니다.");
+    showToast("이 계정의 기록을 중앙에 업로드했습니다.");
   }catch(error){
     cloudStatusMessage=error&&error.message?error.message:"업로드 실패";
     updateCloudPanel();
@@ -583,7 +678,7 @@ function renderTasks(){
     '</div></section>';
 }
 function renderActivity(){const arr=data.runs.slice().sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));return '<div class="page-toolbar"><div><div class="section-title">실제로 해본 것 기록하기 📝</div><div class="section-description">실제 시간과 막힌 이유는 계획 값을 바꾸지 않아요.</div></div><button class="btn btn-primary" data-action="new-run">＋ 실행 기록</button></div><section class="panel"><div class="panel-head"><div><div class="panel-title">실행 타임라인</div><div class="panel-sub">총 '+arr.length+'건 · 소요 시간 합계 '+fmtMinutes(arr.reduce((a,r)=>a+(Number(r.durationMinutes)||0),0))+'</div></div></div>'+(arr.length?arr.map(r=>'<div class="activity-item"><div class="timeline-dot"></div><div class="activity-title">'+esc(r.title||r.taskTitleSnapshot||"실행 기록")+'</div><div class="activity-time">'+fmtDate(r.startedAt,true)+' · '+fmtMinutes(r.durationMinutes)+' · '+esc(r.taskTitleSnapshot||"독립 기록")+'</div>'+(r.blocker?'<div class="activity-note"><b>막힌 부분</b><br>'+esc(r.blocker)+'</div>':"")+(r.note?'<div class="activity-note"><b>메모</b><br>'+esc(r.note)+'</div>':"")+'<div style="margin-top:7px"><button class="btn btn-danger btn-small" data-action="delete-run" data-id="'+esc(r.id)+'">기록 삭제</button></div></div>').join(""):empty("🌤️","아직 실행 기록이 없어요","시작 시각과 소요 시간, 막힌 부분을 기록해 다음번에 참고하세요.","new-run","기록 남기기"))+'</section>'}
-function renderReview(){const s=stats(),byPlan=data.plans.map(p=>{const ts=data.tasks.filter(t=>t.planId===p.id);return{p:p,total:ts.length,done:ts.filter(t=>t.status==="done").length,expectedMinutes:ts.reduce((n,t)=>n+(Number(t.estimatedMinutes)||0),0),actualMinutes:data.runs.filter(r=>ts.some(t=>t.id===r.taskId)).reduce((n,r)=>n+(Number(r.durationMinutes)||0),0)}});const events=data.completionEvents.slice().sort((a,b)=>new Date(b.at)-new Date(a.at));return '<div class="grid stats">'+statCard("☑","완료 기록",s.done+"회","완료 상태로 바뀐 횟수","tone-purple")+statCard("◷","실행한 시간",fmtMinutes(s.mins),"실행 기록의 소요 시간 합계","tone-mint")+statCard("✿","진행 중 할 일",s.open+"개","지금 이어갈 수 있는 일","tone-pink")+statCard("⌁","계획 예상 시간",fmtMinutes(s.planMins),"실제 시간과 별도로 보존","tone-yellow")+'</div><div class="grid home-grid"><section class="panel"><div class="panel-head"><div><div class="panel-title">계획별 돌아보기 🌱</div><div class="panel-sub">삭제하지 않은 할 일과 현재 완료 상태를 보여줘요. 숫자를 누르면 해당 목록을 열 수 있어요.</div></div></div>'+(byPlan.length?byPlan.map(x=>'<div class="history-row"><button type="button" class="review-drilldown review-drilldown-title" data-action="review-plan-tasks" data-plan="'+esc(x.p.id)+'" data-status="done" aria-label="'+esc(x.p.title)+' 계획의 완료된 할 일 상세 보기">'+esc(x.p.title)+'</button><button type="button" class="review-drilldown review-drilldown-count" data-action="review-plan-tasks" data-plan="'+esc(x.p.id)+'" data-status="done" aria-label="'+esc(x.p.title)+' 계획의 완료된 할 일 상세 보기">완료 <strong>'+x.done+'</strong> / '+x.total+'개 · 할 일 예상 합계 '+fmtMinutes(x.expectedMinutes)+' · 실행 기록 합계 '+fmtMinutes(x.actualMinutes)+' · 차이(실제−예상) '+(x.actualMinutes>x.expectedMinutes?"+":x.actualMinutes<x.expectedMinutes?"−":"")+fmtMinutes(Math.abs(x.actualMinutes-x.expectedMinutes))+'</button><div class="progress-line"><span style="width:'+(x.total?Math.round(x.done/x.total*100):0)+'%"></span></div>'+(x.p.successCriteria?'<div class="history-diff"><b>성공 기준</b><br>'+esc(x.p.successCriteria)+'</div>':"")+'</div>').join(""):empty("🪴","아직 돌아볼 계획이 없어요","계획과 할 일을 추가하면 이곳에 진행 상황이 모여요.","new-plan","계획 추가"))+'</section><section class="panel"><div class="panel-head"><div><div class="panel-title">완료 히스토리 💖</div><div class="panel-sub">완료 이벤트가 중복 없이 누적돼요.</div></div></div>'+(events.length?events.slice(0,12).map(e=>'<div class="history-row"><strong>✓ '+esc(e.taskTitleSnapshot||"완료한 할 일")+'</strong><small>'+fmtDate(e.at,true)+'</small></div>').join(""):empty("🎀","첫 완료를 기다리고 있어요","할 일을 완료로 바꾸면 이력이 기록돼요."))+'</section></div><section class="panel" style="margin-top:18px"><div class="panel-head"><div><div class="panel-title">나의 데이터 관리</div><div class="panel-sub">현재 기록은 이 브라우저에 저장됩니다. 주기적으로 백업 파일을 내려받아 주세요.</div></div></div><div class="card-actions"><button class="btn btn-soft" data-action="export-data">↧ 전체 백업 (JSON)</button><button class="btn btn-white" data-action="export-csv">↧ Excel용 CSV</button><button class="btn btn-white" data-action="export-txt">↧ TXT 내보내기</button><button class="btn btn-white" data-action="import-data">↥ 백업 가져오기</button><button class="btn btn-white" data-action="show-storage-note">저장 방식 안내</button></div><div class="hint-box" style="margin-top:13px">☁️ 이 과제용 버전은 Vercel Blob 중앙 저장소를 사용합니다. 로그인 없이 누구나 기록을 읽고 수정할 수 있으므로 민감한 정보는 넣지 마세요. 다른 컴퓨터에서 변경된 내용은 자동으로 반영됩니다. JSON 백업을 안전하게 보관하세요.</div></section>'}
+function renderReview(){const s=stats(),byPlan=data.plans.map(p=>{const ts=data.tasks.filter(t=>t.planId===p.id);return{p:p,total:ts.length,done:ts.filter(t=>t.status==="done").length,expectedMinutes:ts.reduce((n,t)=>n+(Number(t.estimatedMinutes)||0),0),actualMinutes:data.runs.filter(r=>ts.some(t=>t.id===r.taskId)).reduce((n,r)=>n+(Number(r.durationMinutes)||0),0)}});const events=data.completionEvents.slice().sort((a,b)=>new Date(b.at)-new Date(a.at));return '<div class="grid stats">'+statCard("☑","완료 기록",s.done+"회","완료 상태로 바뀐 횟수","tone-purple")+statCard("◷","실행한 시간",fmtMinutes(s.mins),"실행 기록의 소요 시간 합계","tone-mint")+statCard("✿","진행 중 할 일",s.open+"개","지금 이어갈 수 있는 일","tone-pink")+statCard("⌁","계획 예상 시간",fmtMinutes(s.planMins),"실제 시간과 별도로 보존","tone-yellow")+'</div><div class="grid home-grid"><section class="panel"><div class="panel-head"><div><div class="panel-title">계획별 돌아보기 🌱</div><div class="panel-sub">삭제하지 않은 할 일과 현재 완료 상태를 보여줘요. 숫자를 누르면 해당 목록을 열 수 있어요.</div></div></div>'+(byPlan.length?byPlan.map(x=>'<div class="history-row"><button type="button" class="review-drilldown review-drilldown-title" data-action="review-plan-tasks" data-plan="'+esc(x.p.id)+'" data-status="done" aria-label="'+esc(x.p.title)+' 계획의 완료된 할 일 상세 보기">'+esc(x.p.title)+'</button><button type="button" class="review-drilldown review-drilldown-count" data-action="review-plan-tasks" data-plan="'+esc(x.p.id)+'" data-status="done" aria-label="'+esc(x.p.title)+' 계획의 완료된 할 일 상세 보기">완료 <strong>'+x.done+'</strong> / '+x.total+'개 · 할 일 예상 합계 '+fmtMinutes(x.expectedMinutes)+' · 실행 기록 합계 '+fmtMinutes(x.actualMinutes)+' · 차이(실제−예상) '+(x.actualMinutes>x.expectedMinutes?"+":x.actualMinutes<x.expectedMinutes?"−":"")+fmtMinutes(Math.abs(x.actualMinutes-x.expectedMinutes))+'</button><div class="progress-line"><span style="width:'+(x.total?Math.round(x.done/x.total*100):0)+'%"></span></div>'+(x.p.successCriteria?'<div class="history-diff"><b>성공 기준</b><br>'+esc(x.p.successCriteria)+'</div>':"")+'</div>').join(""):empty("🪴","아직 돌아볼 계획이 없어요","계획과 할 일을 추가하면 이곳에 진행 상황이 모여요.","new-plan","계획 추가"))+'</section><section class="panel"><div class="panel-head"><div><div class="panel-title">완료 히스토리 💖</div><div class="panel-sub">완료 이벤트가 중복 없이 누적돼요.</div></div></div>'+(events.length?events.slice(0,12).map(e=>'<div class="history-row"><strong>✓ '+esc(e.taskTitleSnapshot||"완료한 할 일")+'</strong><small>'+fmtDate(e.at,true)+'</small></div>').join(""):empty("🎀","첫 완료를 기다리고 있어요","할 일을 완료로 바꾸면 이력이 기록돼요."))+'</section></div><section class="panel" style="margin-top:18px"><div class="panel-head"><div><div class="panel-title">나의 데이터 관리</div><div class="panel-sub">현재 기록은 이 브라우저에 저장됩니다. 주기적으로 백업 파일을 내려받아 주세요.</div></div></div><div class="card-actions"><button class="btn btn-soft" data-action="export-data">↧ 전체 백업 (JSON)</button><button class="btn btn-white" data-action="export-csv">↧ Excel용 CSV</button><button class="btn btn-white" data-action="export-txt">↧ TXT 내보내기</button><button class="btn btn-white" data-action="import-data">↥ 백업 가져오기</button><button class="btn btn-white" data-action="show-storage-note">저장 방식 안내</button></div><div class="hint-box" style="margin-top:13px">☁️ 이 버전은 로그인한 계정별로 비공개 중앙 저장소에 기록을 보관합니다. 다른 계정의 기록은 분리됩니다. 계정을 공유하지 말고, 중요한 기록은 JSON 백업으로 보관하세요.</div></section>'}
 function render(){const root=document.getElementById("appContent");root.innerHTML=page==="journal"?renderJournal():page==="plans"?renderPlans():page==="tasks"?renderTasks():page==="activity"?renderActivity():page==="review"?renderReview():renderHome()}
 function durationField(label,totalMinutes,opts){opts=opts||{};const total=Math.max(0,Math.floor(Number(totalMinutes)||0)),hours=Math.floor(total/60),minutes=total%60;return '<div class="form-field '+(opts.full?"full":"")+'"><label for="estimatedHours">'+esc(label)+'</label><div class="duration-control" data-duration-group><div class="duration-part"><input id="estimatedHours" name="estimatedHours" type="number" min="0" step="1" value="'+hours+'" data-duration-unit="hours" aria-label="예상 시간 시간"><span>시간</span></div><span class="duration-separator">:</span><div class="duration-part"><input id="estimatedRemainder" name="estimatedRemainder" type="number" min="0" max="59" step="1" value="'+minutes+'" data-duration-unit="minutes" aria-label="예상 시간 분"><span>분</span></div><div class="duration-summary" data-duration-summary>총 예상 시간: '+esc(fmtMinutes(total))+'</div></div></div>'}
 function durationFromForm(hoursValue,minutesValue){const hours=Math.max(0,Math.floor(Number(hoursValue)||0)),minutes=Math.max(0,Math.floor(Number(minutesValue)||0));return hours*60+minutes}
@@ -739,6 +834,7 @@ async function handleAuthSession(session){
   document.getElementById("signedInEmail").textContent=activeUser.email||"로그인됨";
   setPage("home");
   updateCloudPanel();
+  await initializeCloudSync();
 }
 async function performSignOut(){
   if(!authClient)return;
