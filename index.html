@@ -90,7 +90,7 @@ body{background-color:var(--canvas);background-image:radial-gradient(#ded9ce .65
 .auth-field label{font-size:12px;font-weight:800;color:#716e86}
 .auth-field input{width:100%;min-height:44px;border:1px solid #e9e6f1;border-radius:11px;padding:11px 12px;background:#fff;color:var(--ink)}
 .auth-submit{width:100%;margin-top:8px;min-height:44px}
-.auth-link{display:block;margin:14px auto 0;background:transparent;color:#6559db;font-size:12px;font-weight:800;text-align:center}
+.auth-link{display:block;margin:14px auto 0;background:transparent;color:#6559db;font-size:12px;font-weight:800;text-align:center;text-decoration:none;cursor:pointer}
 .auth-message{min-height:20px;margin:12px 0 0;color:#6e6696;font-size:12px;overflow-wrap:anywhere}
 .auth-note{margin:14px 0 0;padding-top:13px;border-top:1px dashed #e9e4d8;color:#9893a7;font-size:10px;line-height:1.7}
 .account-controls{display:flex;align-items:center;gap:8px;min-width:0}
@@ -105,12 +105,12 @@ body{background-color:var(--canvas);background-image:radial-gradient(#ded9ce .65
     <div class="auth-brand"><div class="auth-brand-icon">✎</div><div><strong>Personal Diary</strong><div class="muted" style="font-size:11px">나만의 기록 공간</div></div></div>
     <h1 id="authTitle">다이어리에 로그인</h1>
     <p class="auth-description" id="authDescription">내 계정으로 로그인해 개인 기록을 열어보세요.</p>
-    <form id="authForm">
-      <div class="auth-field"><label for="authEmail">이메일</label><input id="authEmail" name="email" type="email" autocomplete="email" required></div>
-      <div class="auth-field"><label for="authPassword">비밀번호</label><input id="authPassword" name="password" type="password" autocomplete="current-password" minlength="8" required><span class="form-help">8자 이상을 권장합니다.</span></div>
+    <form id="authForm" autocomplete="off">
+      <div class="auth-field"><label for="authEmail">이메일</label><input id="authEmail" name="email" type="email" autocomplete="off" autocapitalize="none" spellcheck="false" required></div>
+      <div class="auth-field"><label for="authPassword">비밀번호</label><input id="authPassword" name="password" type="password" autocomplete="off" minlength="8" required><span class="form-help">8자 이상을 권장합니다.</span></div>
       <button class="btn btn-primary auth-submit" id="authSubmit" type="submit">로그인</button>
     </form>
-    <button class="auth-link" id="authModeToggle" type="button">계정이 없으신가요? 회원가입</button>
+    <a class="auth-link" id="authModeToggle" href="/signup">계정이 없으신가요? 회원가입</a>
     <p class="auth-message" id="authMessage" role="status" aria-live="polite"></p>
     <p class="auth-note">회원가입 후 이메일 확인 링크를 눌러야 로그인할 수 있습니다. 이 단계에서는 기록을 계정별로 이 브라우저에 저장하며, 중앙 서버 동기화는 API 인증 적용 후 활성화됩니다.</p>
   </section>
@@ -144,7 +144,7 @@ body{background-color:var(--canvas);background-image:radial-gradient(#ded9ce .65
 const STORE_KEY="mellow-diary-v1";
 const SUPABASE_URL="https://ndizvumhicvtlnxpntuk.supabase.co";
 const SUPABASE_PUBLISHABLE_KEY="sb_publishable_AgBlHJTYkBRUQ4KYkqNOew_0NH9ICJV";
-let authClient=null,activeUser=null,authMode="signin",authBusy=false;
+let authClient=null,activeUser=null,authMode=window.location.pathname.replace(/\/+$/,"")==="/signup"?"signup":"signin",authBusy=false;
 function currentStoreKey(){return activeUser?STORE_KEY+"-user-"+activeUser.id:null}
 function userStorageKey(suffix){const key=currentStoreKey();return key?key+(suffix||""):null}
 const labels={home:["YOUR PERSONAL SPACE","오늘의 페이지를 펼쳐요 ✎","생각을 정리하고 작은 성취를 모아보세요."],plans:["GENTLE PLANNING","나의 계획","하고 싶은 일과 도달하고 싶은 모습을 정리해요."],tasks:["LITTLE BY LITTLE","할 일 목록","오늘의 작은 실천을 찾고, 나에게 맞는 순서로 정리해요."],activity:["REAL LIFE LOG","실행 기록","계획과 별개로 실제로 해본 것들을 남겨요."],review:["LOOKING BACK","돌아보기","얼마나 해냈는지보다 무엇을 배웠는지도 살펴봐요."],journal:["DAILY JOURNAL","나의 일기장","그날의 생각과 순간을 편하게 남겨요."]};
@@ -763,14 +763,25 @@ function setAuthMessage(message,isError){
   const el=document.getElementById("authMessage");
   if(el){el.textContent=message||"";el.style.color=isError?"#a33b38":"#6e6696";}
 }
+function clearAuthInputs(){
+  const email=document.getElementById("authEmail");
+  const password=document.getElementById("authPassword");
+  if(email)email.value="";
+  if(password)password.value="";
+}
 function setAuthMode(mode){
   authMode=mode==="signup"?"signup":"signin";
   const signup=authMode==="signup";
+  document.title=signup?"Mellow Diary | 새 계정 만들기":"Mellow Diary | 로그인";
+  const gate=document.getElementById("authGate");
+  if(gate)gate.setAttribute("aria-label",signup?"새 계정 만들기":"다이어리 로그인");
   document.getElementById("authTitle").textContent=signup?"새 계정 만들기":"다이어리에 로그인";
   document.getElementById("authDescription").textContent=signup?"이메일과 비밀번호로 개인 다이어리 계정을 만드세요.":"내 계정으로 로그인해 개인 기록을 열어보세요.";
   document.getElementById("authSubmit").textContent=signup?"회원가입":"로그인";
-  document.getElementById("authModeToggle").textContent=signup?"이미 계정이 있으신가요? 로그인":"계정이 없으신가요? 회원가입";
-  document.getElementById("authPassword").setAttribute("autocomplete",signup?"new-password":"current-password");
+  const toggle=document.getElementById("authModeToggle");
+  if(toggle){toggle.href=signup?"/login":"/signup";toggle.textContent=signup?"이미 계정이 있으신가요? 로그인":"계정이 없으신가요? 회원가입";}
+  const password=document.getElementById("authPassword");
+  if(password)password.setAttribute("autocomplete","off");
   setAuthMessage("");
 }
 function showAuthGate(message,isError){
@@ -843,7 +854,9 @@ async function performSignOut(){
 }
 async function initializeSupabaseAuth(){
   const emailEnabledMessage="Supabase Auth 연결을 확인할 수 없습니다. 페이지를 새로고침하거나 설정을 확인해 주세요.";
-  document.getElementById("authModeToggle").addEventListener("click",()=>setAuthMode(authMode==="signin"?"signup":"signin"));
+  setAuthMode(authMode);
+  clearAuthInputs();
+  window.addEventListener("pageshow",()=>{clearAuthInputs();});
   document.getElementById("authForm").addEventListener("submit",async event=>{
     event.preventDefault();
     if(authBusy)return;
@@ -858,7 +871,7 @@ async function initializeSupabaseAuth(){
     setAuthMessage("");
     try{
       if(authMode==="signup"){
-        const {data:result,error}=await authClient.auth.signUp({email,password,options:{emailRedirectTo:window.location.origin}});
+        const {data:result,error}=await authClient.auth.signUp({email,password,options:{emailRedirectTo:new URL("/login",window.location.origin).href}});
         if(error)throw error;
         if(result.session){
           await handleAuthSession(result.session);
