@@ -4,11 +4,11 @@
   "rewrites": [
     {
       "source": "/signup",
-      "destination": "/index.html"
+      "destination": "/"
     },
     {
       "source": "/login",
-      "destination": "/index.html"
+      "destination": "/"
     },
     {
       "source": "/favicon.ico",
