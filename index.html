@@ -151,7 +151,7 @@ const labels={home:["YOUR PERSONAL SPACE","오늘의 페이지를 펼쳐요 ✎"
 const blank=()=>({plans:[],tasks:[],runs:[],completionEvents:[],entries:[]});
 let data=blank(),page="home",query="",statusFilter="all",priorityFilter="all",tagFilter="",planFilter="",sortMode="sequence",priorityOrder="asc",toastTimer;
 const lastCompletionClick=new Map();
-let cloudState="disabled",cloudUpdatedAt=null,cloudRevision=null,cloudSaveTimer=null,cloudSaveInFlight=false,cloudPendingRemote=null,cloudStatusMessage="로그인 후 Supabase DB에 연결합니다.",lastLocalEditAt=0,cloudLastSyncedData=null,cloudDirty=false,cloudExitFlushStarted=false,cloudRealtimeChannel=null,cloudRealtimeConnected=false,cloudRemoteRefreshInFlight=false,cloudQueuedRevision=0;
+let cloudState="disabled",cloudUpdatedAt=null,cloudRevision=null,cloudSaveTimer=null,cloudSaveInFlight=false,cloudPendingRemote=null,cloudStatusMessage="로그인 후 Supabase DB에 연결합니다.",lastLocalEditAt=0,cloudLastSyncedData=null,cloudDirty=false,cloudExitFlushStarted=false,cloudRealtimeChannel=null,cloudRealtimeConnected=false,cloudRemoteRefreshInFlight=false,cloudQueuedRevision=0,cloudQueuedBroadcast=null;
 function normalizeData(input){const d=input&&typeof input==="object"?input:{};const rawEvents=Array.isArray(d.completionEvents)?d.completionEvents:[];const completionEvents=rawEvents.filter(e=>e&&typeof e==="object").map(e=>({id:String(e.id||id()),taskId:String(e.taskId||""),taskTitleSnapshot:String(e.taskTitleSnapshot||"완료한 할 일"),cycleKey:String(e.cycleKey||"1"),at:validDateString(e.at)?String(e.at):nowISO()}));const cycleByTask={};completionEvents.forEach(e=>{const n=Number(e.cycleKey)||0;cycleByTask[e.taskId]=Math.max(cycleByTask[e.taskId]||0,n)});const plans=(Array.isArray(d.plans)?d.plans:[]).filter(p=>p&&typeof p==="object").map(p=>({...p,id:String(p.id||id()),title:String(p.title||"제목 없는 계획"),category:String(p.category||"기타"),description:String(p.description||""),startDate:String(p.startDate||""),endDate:String(p.endDate||""),successCriteria:String(p.successCriteria||""),priority:normalizePriority(p.priority),estimatedMinutes:safeMinutes(p.estimatedMinutes),status:["active","paused","done"].includes(p.status)?p.status:"active",versionNo:Math.max(1,Number(p.versionNo)||1),history:Array.isArray(p.history)?p.history.filter(h=>h&&typeof h==="object").map(h=>({...h,title:String(h.title||"제목 없는 계획"),category:String(h.category||"기타"),description:String(h.description||""),startDate:String(h.startDate||""),endDate:String(h.endDate||""),successCriteria:String(h.successCriteria||""),priority:normalizePriority(h.priority),estimatedMinutes:safeMinutes(h.estimatedMinutes),version:Math.max(1,Number(h.version)||1),savedAt:validDateString(h.savedAt)?String(h.savedAt):nowISO()})):[],createdAt:validDateString(p.createdAt)?String(p.createdAt):nowISO(),updatedAt:validDateString(p.updatedAt)?String(p.updatedAt):(validDateString(p.createdAt)?String(p.createdAt):nowISO())}));const usedSequenceNumbers=new Set();
 const tasks=(Array.isArray(d.tasks)?d.tasks:[]).filter(t=>t&&typeof t==="object").map((t,index)=>{
   let sequenceNo=Number(t.sequenceNo);
@@ -410,7 +410,7 @@ function stopDiaryRealtime(){
   if(channel&&authClient){try{void authClient.removeChannel(channel)}catch(error){}}
 }
 async function startDiaryRealtime(userId){
-  stopDiaryRealtime();cloudQueuedRevision=0;
+  stopDiaryRealtime();cloudQueuedRevision=0;cloudQueuedBroadcast=null;
   if(!authClient||!activeUser||activeUser.id!==userId)return false;
   try{authClient.realtime.setAuth(await getCurrentAccessToken())}
   catch(error){console.warn("Realtime token refresh failed:",error&&error.message?error.message:error)}
@@ -423,8 +423,9 @@ async function startDiaryRealtime(userId){
         const revision=Number(payload&&payload.revision);
         if(!Number.isSafeInteger(revision)||revision<1||revision<=Number(cloudRevision||0))return;
         cloudQueuedRevision=Math.max(cloudQueuedRevision,revision);
+        if(!cloudQueuedBroadcast||revision>=Number(cloudQueuedBroadcast.revision||0))cloudQueuedBroadcast=payload;
         if(cloudState==="checking"||cloudState==="disabled"||cloudSaveInFlight)return;
-        void handleDiaryBroadcast(revision);
+        void handleDiaryBroadcast(payload);
       });
     cloudRealtimeChannel=channel;timer=setTimeout(()=>finish(false),6000);
     channel.subscribe((status,error)=>{
@@ -435,29 +436,75 @@ async function startDiaryRealtime(userId){
     });
   });
 }
-async function handleDiaryBroadcast(revisionHint){
-  cloudQueuedRevision=Math.max(cloudQueuedRevision,Number(revisionHint)||0);
-  if(cloudRemoteRefreshInFlight||!activeUser||cloudState==="checking"||cloudState==="disabled"||cloudState==="conflict")return;
-  if(cloudQueuedRevision<=Number(cloudRevision||0)){cloudQueuedRevision=0;return}
+function applyDiaryDeltaToData(changes){
+  if(!changes||typeof changes!=="object")return null;
+  const next=normalizeData(data);
+  for(const key of ["plans","tasks","runs","completionEvents","entries"]){
+    const delta=changes[key];
+    if(!delta||!Array.isArray(delta.upsert)||!Array.isArray(delta.delete))return null;
+    const byId=new Map(next[key].map(item=>[String(item.id),item]));
+    for(const deletedId of delta.delete)byId.delete(String(deletedId));
+    for(const item of delta.upsert){
+      if(!item||typeof item!=="object"||Array.isArray(item)||item.id===undefined||item.id===null)return null;
+      byId.set(String(item.id),item);
+    }
+    next[key]=Array.from(byId.values());
+  }
+  return normalizeData(next);
+}
+function hasUnsentDiaryChanges(){
+  return cloudDirty||!!cloudSaveTimer||cloudSaveInFlight||
+    (cloudLastSyncedData===null?hasRecords(data):comparableData(data)!==cloudLastSyncedData);
+}
+async function handleDiaryBroadcast(notification){
+  const note=notification&&typeof notification==="object"?notification:{revision:Number(notification),full_refresh:true};
+  const incomingRevision=Number(note.revision);
+  if(!Number.isSafeInteger(incomingRevision)||incomingRevision<1)return;
+  cloudQueuedRevision=Math.max(cloudQueuedRevision,incomingRevision);
+  if(!cloudQueuedBroadcast||incomingRevision>=Number(cloudQueuedBroadcast.revision||0))cloudQueuedBroadcast=note;
+  if(cloudRemoteRefreshInFlight||!activeUser||cloudState==="checking"||cloudState==="disabled"||cloudState==="conflict"||cloudSaveInFlight)return;
+  if(incomingRevision<=Number(cloudRevision||0)){
+    if(cloudQueuedRevision<=Number(cloudRevision||0)){cloudQueuedRevision=0;cloudQueuedBroadcast=null;}
+    return;
+  }
   cloudRemoteRefreshInFlight=true;
   try{
-    const remote=await requestSharedDiary();
-    if(!remote.exists){cloudRevision=null;cloudState="empty";cloudStatusMessage="";updateCloudPanel();return}
-    if(Number(remote.revision)<=Number(cloudRevision||0))return;
-    const localChanged=cloudDirty||!!cloudSaveTimer||cloudSaveInFlight||
-      (cloudLastSyncedData===null?hasRecords(data):comparableData(data)!==cloudLastSyncedData);
-    if(localChanged){
-      if(cloudSaveTimer){clearTimeout(cloudSaveTimer);cloudSaveTimer=null}
-      cloudPendingRemote={...remote,data:normalizeData(remote.data)};
-      cloudState="conflict";cloudStatusMessage="다른 기기에서 변경되었지만 이 브라우저에도 저장하지 않은 변경이 있습니다. 자동 덮어쓰기를 멈췄습니다.";
-      updateCloudPanel();return;
+    if(hasUnsentDiaryChanges()){
+      const latest=await requestSharedDiary();
+      if(latest.exists&&Number(latest.revision)>Number(cloudRevision||0)){
+        cloudPendingRemote={...latest,data:normalizeData(latest.data)};
+        cloudState="conflict";
+        cloudStatusMessage="다른 기기에서 변경되었지만 이 브라우저에도 저장하지 않은 변경이 있습니다. 자동 덮어쓰기를 멈췄습니다.";
+        updateCloudPanel();
+      }
+      return;
     }
-    applySharedDiary(remote);
-  }catch(error){cloudStatusMessage=error&&error.message?error.message:"변경 알림 후 최신 기록을 읽지 못했습니다.";updateCloudPanel()}
+    let remoteData=null,remoteRevision=incomingRevision,remoteUpdatedAt=note.updated_at||cloudUpdatedAt;
+    const isContiguous=incomingRevision===Number(cloudRevision||0)+1;
+    if(!note.full_refresh&&note.changes&&isContiguous)remoteData=applyDiaryDeltaToData(note.changes);
+    if(!remoteData){
+      const latest=await requestSharedDiary();
+      if(!latest.exists){cloudRevision=null;cloudState="empty";cloudStatusMessage="";updateCloudPanel();return}
+      remoteData=normalizeData(latest.data);remoteRevision=Number(latest.revision);remoteUpdatedAt=latest.updatedAt||remoteUpdatedAt;
+      if(remoteRevision<=Number(cloudRevision||0))return;
+    }
+    if(hasUnsentDiaryChanges()){
+      const latest=await requestSharedDiary();
+      if(latest.exists&&Number(latest.revision)>Number(cloudRevision||0)){
+        cloudPendingRemote={...latest,data:normalizeData(latest.data)};
+        cloudState="conflict";
+        cloudStatusMessage="동기화 중 이 브라우저에서도 변경되어 자동 반영을 멈췄습니다. 중앙 기록과 비교해 주세요.";
+        updateCloudPanel();
+      }
+      return;
+    }
+    applySharedDiary({ok:true,exists:true,data:remoteData,revision:remoteRevision,updatedAt:remoteUpdatedAt});
+  }catch(error){cloudStatusMessage=error&&error.message?error.message:"변경 알림 후 최신 기록을 반영하지 못했습니다.";updateCloudPanel()}
   finally{
-    cloudRemoteRefreshInFlight=false;const queued=cloudQueuedRevision;
-    if(queued<=Number(cloudRevision||0)||cloudState==="conflict")cloudQueuedRevision=0;
-    else if(queued>Number(cloudRevision||0))void handleDiaryBroadcast(queued);
+    cloudRemoteRefreshInFlight=false;
+    const queued=cloudQueuedRevision;
+    if(queued<=Number(cloudRevision||0)){cloudQueuedRevision=0;cloudQueuedBroadcast=null}
+    else if(cloudState!=="conflict")void handleDiaryBroadcast(cloudQueuedBroadcast||{revision:queued,full_refresh:true});
   }
 }
 function markCloudDirty(){
@@ -507,8 +554,8 @@ async function flushCloudDiary(options={}){
   }finally{
     cloudSaveInFlight=false;updateCloudPanel();
     const queued=cloudQueuedRevision;
-    if(queued<=Number(cloudRevision||0))cloudQueuedRevision=0;
-    else if(cloudState!=="conflict")void handleDiaryBroadcast(queued);
+    if(queued<=Number(cloudRevision||0)){cloudQueuedRevision=0;cloudQueuedBroadcast=null;}
+    else if(cloudState!=="conflict")void handleDiaryBroadcast(cloudQueuedBroadcast||{revision:queued,full_refresh:true});
   }
 }
 async function uploadLocalDiaryToCloud(overwrite){
@@ -530,8 +577,8 @@ async function uploadLocalDiaryToCloud(overwrite){
   }finally{
     cloudSaveInFlight=false;updateCloudPanel();
     const queued=cloudQueuedRevision;
-    if(queued<=Number(cloudRevision||0))cloudQueuedRevision=0;
-    else if(cloudState!=="conflict")void handleDiaryBroadcast(queued);
+    if(queued<=Number(cloudRevision||0)){cloudQueuedRevision=0;cloudQueuedBroadcast=null;}
+    else if(cloudState!=="conflict")void handleDiaryBroadcast(cloudQueuedBroadcast||{revision:queued,full_refresh:true});
   }
 }
 async function pullSharedDiary(){
@@ -585,8 +632,8 @@ async function overwriteCloudWithLocal(){
   }finally{
     cloudSaveInFlight=false;updateCloudPanel();
     const queued=cloudQueuedRevision;
-    if(queued<=Number(cloudRevision||0))cloudQueuedRevision=0;
-    else if(cloudState!=="conflict")void handleDiaryBroadcast(queued);
+    if(queued<=Number(cloudRevision||0)){cloudQueuedRevision=0;cloudQueuedBroadcast=null;}
+    else if(cloudState!=="conflict")void handleDiaryBroadcast(cloudQueuedBroadcast||{revision:queued,full_refresh:true});
   }
 }
 function id(){return (typeof crypto!=="undefined"&&crypto.randomUUID)?crypto.randomUUID():("id-"+Date.now()+"-"+Math.random().toString(36).slice(2,10))}
