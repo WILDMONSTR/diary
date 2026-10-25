@@ -149,7 +149,7 @@ async function readUserDiary(pathname, user) {
   // Once stored, this reads the private Blob directly without calling list().
   if (blobUrl) {
     try {
-      const candidate = await get(blobUrl, { access: "private" });
+      const candidate = await get(blobUrl, { access: "private", useCache: false });
       if (candidate && candidate.blob && candidate.blob.pathname === pathname) {
         downloaded = candidate;
         blob = candidate.blob;
@@ -172,7 +172,7 @@ async function readUserDiary(pathname, user) {
       };
     }
     blobUrl = blob.url;
-    downloaded = await get(blobUrl, { access: "private" });
+    downloaded = await get(blobUrl, { access: "private", useCache: false });
   }
 
   if (!downloaded) return { exists: false, data: null, updatedAt: null };
