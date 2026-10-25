@@ -1014,7 +1014,11 @@ async function changePasswordFromForm(values){
     closeModal();
     const {error:signOutError}=await authClient.auth.signOut({scope:"global"});
     if(signOutError){
-      showToast("비밀번호는 변경됐지만 모든 세션을 종료했는지 확인할 수 없습니다. 다시 로그인하고 이전 세션을 점검하세요.");
+      // Fail closed on this browser if global revocation could not be confirmed.
+      await authClient.auth.signOut({scope:"local"});
+      setAuthMode("signin");
+      clearAuthInputs();
+      showAuthGate("비밀번호는 변경됐지만 다른 기기 세션 종료 여부를 확인하지 못했습니다. 다른 기기도 직접 로그아웃하고 다시 로그인하세요.",true);
       return;
     }
     setAuthMode("signin");
