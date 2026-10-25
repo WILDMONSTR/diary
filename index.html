@@ -256,35 +256,98 @@ async function getCurrentAccessToken(){
   if(!token)throw new Error("로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
   return token;
 }
-async function requestSharedDiary(){
-  if(!authClient||!activeUser)throw new Error("먼저 로그인해 주세요.");
-  const {data:row,error}=await authClient.from("diary_documents")
-    .select("data,revision,updated_at").eq("user_id",activeUser.id).maybeSingle();
-  if(error)throw new Error(error.message||"Supabase DB에서 기록을 읽지 못했습니다.");
-  if(!row)return {ok:true,exists:false,data:null,revision:null,updatedAt:null};
-  return {ok:true,exists:true,data:normalizeData(row.data),revision:Number(row.revision),updatedAt:row.updated_at||null};
+function buildDiaryDelta(previousValue,nextValue){
+  const previous=normalizeData(previousValue||blank());
+  const next=normalizeData(nextValue||blank());
+  const changes={};
+  for(const key of ["plans","tasks","runs","completionEvents","entries"]){
+    const oldById=new Map(previous[key].map(item=>[String(item.id),item]));
+    const newById=new Map(next[key].map(item=>[String(item.id),item]));
+    const upsert=[];
+    for(const item of next[key]){
+      const keyId=String(item.id),old=oldById.get(keyId);
+      if(!old||JSON.stringify(old)!==JSON.stringify(item))upsert.push(item);
+    }
+    const deleted=[];
+    for(const item of previous[key]){
+      if(!newById.has(String(item.id)))deleted.push(String(item.id));
+    }
+    changes[key]={upsert,delete:deleted};
+  }
+  return changes;
+}
+function hasDiaryDelta(changes){
+  return ["plans","tasks","runs","completionEvents","entries"].some(key=>
+    changes[key]&&(changes[key].upsert.length>0||changes[key].delete.length>0)
+  );
+}
+function baselineDataOrBlank(){
+  try{return cloudLastSyncedData?normalizeData(JSON.parse(cloudLastSyncedData)):blank()}
+  catch(error){return blank()}
 }
 
-async function writeSharedDiary(candidate,expectedRevision){
+async function requestSharedDiary(){
   if(!authClient||!activeUser)throw new Error("먼저 로그인해 주세요.");
-  const normalized=normalizeData(candidate);let row=null,error=null;
-  if(expectedRevision===null||expectedRevision===undefined){
-    const result=await authClient.from("diary_documents").insert({user_id:activeUser.id,data:normalized})
-      .select("revision,updated_at").maybeSingle();
-    row=result.data;error=result.error;
-  }else{
-    const result=await authClient.from("diary_documents").update({data:normalized})
-      .eq("user_id",activeUser.id).eq("revision",Number(expectedRevision))
-      .select("revision,updated_at").maybeSingle();
-    row=result.data;error=result.error;
+  const [itemsResult,stateResult]=await Promise.all([
+    authClient.from("diary_items").select("collection,item_id,item").eq("user_id",activeUser.id),
+    authClient.from("diary_sync_state").select("revision,updated_at").eq("user_id",activeUser.id).maybeSingle()
+  ]);
+  if(itemsResult.error)throw new Error(itemsResult.error.message||"Supabase DB에서 기록을 읽지 못했습니다.");
+  if(stateResult.error)throw new Error(stateResult.error.message||"Supabase DB 동기화 버전을 읽지 못했습니다.");
+  const rows=itemsResult.data||[];
+  const state=stateResult.data;
+  if(!state){
+    if(rows.length)throw new Error("동기화 버전 없이 저장된 기록이 발견되었습니다. 데이터를 안전하게 보존한 뒤 지원이 필요합니다.");
+    return {ok:true,exists:false,data:null,revision:null,updatedAt:null};
   }
+  const loaded=blank();
+  const collections=new Set(["plans","tasks","runs","completionEvents","entries"]);
+  for(const row of rows){
+    if(!collections.has(row.collection)||!row.item||typeof row.item!=="object"||Array.isArray(row.item))continue;
+    loaded[row.collection].push(row.item);
+  }
+  // Stable ordering when reassembling the per-record rows. Views still apply their own filters/sorts.
+  loaded.plans.sort((a,b)=>String(a.createdAt||"").localeCompare(String(b.createdAt||"")));
+  loaded.tasks.sort((a,b)=>(Number(a.sequenceNo)||0)-(Number(b.sequenceNo)||0));
+  loaded.runs.sort((a,b)=>String(a.createdAt||a.startedAt||"").localeCompare(String(b.createdAt||b.startedAt||"")));
+  loaded.completionEvents.sort((a,b)=>String(a.at||"").localeCompare(String(b.at||"")));
+  loaded.entries.sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))||String(a.createdAt||"").localeCompare(String(b.createdAt||"")));
+  return {ok:true,exists:true,data:normalizeData(loaded),revision:Number(state.revision),updatedAt:state.updated_at||null};
+}
+
+async function writeSharedDiary(candidate,expectedRevision,baseData){
+  if(!authClient||!activeUser)throw new Error("먼저 로그인해 주세요.");
+  const normalized=normalizeData(candidate);
+  let previous;
+  if(baseData!==undefined&&baseData!==null)previous=normalizeData(baseData);
+  else if(expectedRevision===null||expectedRevision===undefined)previous=blank();
+  else previous=baselineDataOrBlank();
+
+  const changes=buildDiaryDelta(previous,normalized);
+  if(!hasDiaryDelta(changes)){
+    return {
+      ok:true,exists:expectedRevision!==null&&expectedRevision!==undefined,
+      data:normalized,revision:expectedRevision===null||expectedRevision===undefined?cloudRevision:Number(expectedRevision),
+      updatedAt:cloudUpdatedAt,unchanged:true
+    };
+  }
+
+  const {data:result,error}=await authClient.rpc("apply_diary_delta",{
+    p_expected_revision:expectedRevision===null||expectedRevision===undefined?null:Number(expectedRevision),
+    p_changes:changes
+  });
   if(error){
-    const conflict=error.code==="23505"||error.code==="40001";
-    const failure=new Error(conflict?"다른 기기에서 먼저 DB 기록을 만들거나 변경했습니다.":(error.message||"Supabase DB에 기록을 저장하지 못했습니다."));
+    const conflict=error.code==="40001"||/diary revision conflict/i.test(error.message||"");
+    const failure=new Error(conflict
+      ?"다른 기기에서 먼저 DB 기록을 만들거나 변경했습니다."
+      :(error.message||"Supabase DB에 변경 사항을 저장하지 못했습니다."));
     failure.status=conflict?409:500;failure.code=error.code;throw failure;
   }
-  if(!row){const failure=new Error("다른 기기에서 먼저 DB 기록을 변경했습니다. 최신 기록을 확인해야 합니다.");failure.status=409;throw failure;}
-  return {ok:true,exists:true,data:normalized,revision:Number(row.revision),updatedAt:row.updated_at||null};
+  const saved=Array.isArray(result)?result[0]:result;
+  if(!saved||!Number.isFinite(Number(saved.revision))){
+    const failure=new Error("DB가 저장 버전을 반환하지 않았습니다.");failure.status=500;throw failure;
+  }
+  return {ok:true,exists:true,data:normalized,revision:Number(saved.revision),updatedAt:saved.updated_at||null};
 }
 
 async function requestLegacyBlobDiary(){
@@ -620,7 +683,7 @@ async function overwriteCloudWithLocal(){
   if(!confirm("이 브라우저 기록으로 Supabase DB의 최신 기록을 교체합니다. JSON 백업을 확인했고 계속할까요?"))return;
   cloudSaveInFlight=true;updateCloudPanel();
   try{
-    const result=await writeSharedDiary(data,cloudPendingRemote?.revision??cloudRevision);
+    const result=await writeSharedDiary(data,cloudPendingRemote?.revision??cloudRevision,cloudPendingRemote?.data);
     applySharedDiary({...result,data});showToast("이 브라우저 기록을 DB에 저장했습니다.");
   }catch(error){
     cloudStatusMessage=error&&error.message?error.message:"DB 덮어쓰기 실패";
