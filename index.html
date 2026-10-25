@@ -303,7 +303,9 @@ async function importLegacyBlobDiary(){
     const legacy=await requestLegacyBlobDiary();
     if(!legacy.exists||!legacy.data||!hasRecords(legacy.data)){showToast("가져올 이전 Blob 기록을 찾지 못했습니다. Blob 저장소가 정지되었는지도 확인해 주세요.");return}
     if(hasRecords(data)){if(!confirm("현재 브라우저 기록을 JSON 백업으로 저장한 다음 Blob 기록으로 바꿔 DB에 복사할까요?"))return;exportData()}
-    const saved=await writeSharedDiary(legacy.data,null);
+    cloudSaveInFlight=true;
+    let saved;
+    try{saved=await writeSharedDiary(legacy.data,null)}finally{cloudSaveInFlight=false}
     applySharedDiary(saved);showToast("이전 Blob 기록을 Supabase DB로 복사했습니다. Blob 원본은 그대로 보존됩니다.");
   }catch(error){cloudStatusMessage=error&&error.message?error.message:"이전 Blob 기록을 읽지 못했습니다.";updateCloudPanel();showToast("Blob 가져오기에 실패했어요. 기존 데이터는 변경하지 않았습니다.")}
 }
@@ -421,7 +423,7 @@ async function startDiaryRealtime(userId){
         const revision=Number(payload&&payload.revision);
         if(!Number.isSafeInteger(revision)||revision<1||revision<=Number(cloudRevision||0))return;
         cloudQueuedRevision=Math.max(cloudQueuedRevision,revision);
-        if(cloudState==="checking"||cloudState==="disabled")return;
+        if(cloudState==="checking"||cloudState==="disabled"||cloudSaveInFlight)return;
         void handleDiaryBroadcast(revision);
       });
     cloudRealtimeChannel=channel;timer=setTimeout(()=>finish(false),6000);
@@ -502,18 +504,35 @@ async function flushCloudDiary(options={}){
     }
     if(!keepalive)showToast("DB 저장에 실패했어요. 이 브라우저의 기록은 유지됩니다.");
     return false;
-  }finally{cloudSaveInFlight=false;updateCloudPanel()}
+  }finally{
+    cloudSaveInFlight=false;updateCloudPanel();
+    const queued=cloudQueuedRevision;
+    if(queued<=Number(cloudRevision||0))cloudQueuedRevision=0;
+    else if(cloudState!=="conflict")void handleDiaryBroadcast(queued);
+  }
 }
 async function uploadLocalDiaryToCloud(overwrite){
   if(cloudState!=="empty"&&!overwrite)return;
   if(!overwrite&&!hasRecords(data)){showToast("업로드할 기존 기록이 없습니다.");return}
-  const prompt=overwrite?"이 계정의 DB 기록을 이 브라우저 기록으로 교체합니다. 다른 기기의 변경을 확인했고 JSON 백업도 보관했나요?":"이 브라우저 기록을 현재 계정의 Supabase DB에 처음 저장할까요? 다른 계정 기록은 변경하지 않습니다.";
+  const prompt=overwrite
+    ?"이 계정의 DB 기록을 이 브라우저 기록으로 교체합니다. 다른 기기의 변경을 확인했고 JSON 백업도 보관했나요?"
+    :"이 브라우저 기록을 현재 계정의 Supabase DB에 처음 저장할까요? 다른 계정의 기록은 변경하지 않습니다.";
   if(!confirm(prompt))return;
+  cloudSaveInFlight=true;updateCloudPanel();
   try{
     const expectedRevision=overwrite?(cloudPendingRemote?.revision??cloudRevision):null;
     const result=await writeSharedDiary(data,expectedRevision);
-    applySharedDiary({...result,data});showToast("이 계정의 기록을 Supabase DB에 저장했습니다.");
-  }catch(error){cloudStatusMessage=error&&error.message?error.message:"DB 업로드 실패";updateCloudPanel();showToast("DB 업로드에 실패했어요. 브라우저 기록은 유지됩니다.")}
+    applySharedDiary({...result,data});
+    showToast("이 계정의 기록을 Supabase DB에 저장했습니다.");
+  }catch(error){
+    cloudStatusMessage=error&&error.message?error.message:"DB 업로드 실패";
+    updateCloudPanel();showToast("DB 업로드에 실패했어요. 브라우저 기록은 유지됩니다.");
+  }finally{
+    cloudSaveInFlight=false;updateCloudPanel();
+    const queued=cloudQueuedRevision;
+    if(queued<=Number(cloudRevision||0))cloudQueuedRevision=0;
+    else if(cloudState!=="conflict")void handleDiaryBroadcast(queued);
+  }
 }
 async function pullSharedDiary(){
   if(cloudSaveTimer||cloudSaveInFlight){
@@ -552,6 +571,7 @@ async function usePendingCloudDiary(){
 async function overwriteCloudWithLocal(){
   if(!cloudPendingRemote)return;
   if(!confirm("이 브라우저 기록으로 Supabase DB의 최신 기록을 교체합니다. JSON 백업을 확인했고 계속할까요?"))return;
+  cloudSaveInFlight=true;updateCloudPanel();
   try{
     const result=await writeSharedDiary(data,cloudPendingRemote?.revision??cloudRevision);
     applySharedDiary({...result,data});showToast("이 브라우저 기록을 DB에 저장했습니다.");
@@ -562,6 +582,11 @@ async function overwriteCloudWithLocal(){
       cloudState="conflict";cloudStatusMessage="저장 중 다른 기기에서 다시 변경되었습니다. 최신 기록을 확인해 주세요.";
     }
     updateCloudPanel();showToast("DB 저장에 실패했습니다. 기록은 유지됩니다.");
+  }finally{
+    cloudSaveInFlight=false;updateCloudPanel();
+    const queued=cloudQueuedRevision;
+    if(queued<=Number(cloudRevision||0))cloudQueuedRevision=0;
+    else if(cloudState!=="conflict")void handleDiaryBroadcast(queued);
   }
 }
 function id(){return (typeof crypto!=="undefined"&&crypto.randomUUID)?crypto.randomUUID():("id-"+Date.now()+"-"+Math.random().toString(36).slice(2,10))}
