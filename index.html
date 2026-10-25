@@ -318,18 +318,13 @@ async function writeSharedDiary(candidate,expectedRevision){
 
 function applySharedDiary(result){
   const key=currentStoreKey();if(!key)throw new Error("로그인 후에만 기록을 불러올 수 있습니다.");
-  data=normalizeData(result.data);
-  localStorage.setItem(key,JSON.stringify(data));
+  data=normalizeData(result.data);localStorage.setItem(key,JSON.stringify(data));
   cloudUpdatedAt=result.updatedAt||null;
-  cloudBlobEtag=result.etag||null;
-  cloudDirty=false;
-  cloudExitFlushStarted=false;
-  storeCloudBaseline(data);
-  cloudState="ready";
-  cloudPendingRemote=null;
-  cloudStatusMessage="";
-  render();
-  updateCloudPanel();
+  cloudRevision=result.revision===null||result.revision===undefined?null:Number(result.revision);
+  cloudDirty=false;cloudExitFlushStarted=false;
+  if(cloudSaveTimer){clearTimeout(cloudSaveTimer);cloudSaveTimer=null;}
+  storeCloudBaseline(data);cloudState="ready";cloudPendingRemote=null;cloudStatusMessage="";
+  render();updateCloudPanel();
 }
 async function initializeCloudSync(){
   if(!activeUser){
@@ -346,7 +341,7 @@ async function initializeCloudSync(){
     const result=await requestSharedDiary();
     if(!result.exists){
       cloudUpdatedAt=null;
-      cloudBlobEtag=null;
+      cloudRevision=null;
       cloudPendingRemote=null;
       if(hasRecords(data)){
         cloudState="empty";
@@ -382,7 +377,7 @@ async function initializeCloudSync(){
       if(remoteComparable===cloudLastSyncedData){
         cloudState="ready";
         cloudUpdatedAt=result.updatedAt||cloudUpdatedAt;
-        cloudBlobEtag=result.etag||null;
+        cloudRevision=Number(result.revision);
         cloudPendingRemote=null;
         cloudStatusMessage="";
         cloudDirty=true;
@@ -416,69 +411,106 @@ async function initializeCloudSync(){
   }
 }
 
+function stopDiaryRealtime(){
+  const channel=cloudRealtimeChannel;cloudRealtimeChannel=null;cloudRealtimeConnected=false;
+  if(channel&&authClient){try{void authClient.removeChannel(channel)}catch(error){}}
+}
+async function startDiaryRealtime(userId){
+  stopDiaryRealtime();cloudQueuedRevision=0;
+  if(!authClient||!activeUser||activeUser.id!==userId)return false;
+  try{authClient.realtime.setAuth(await getCurrentAccessToken())}
+  catch(error){console.warn("Realtime token refresh failed:",error&&error.message?error.message:error)}
+  return await new Promise(resolve=>{
+    let finished=false,timer=null;
+    const finish=value=>{if(finished)return;finished=true;if(timer)clearTimeout(timer);cloudRealtimeConnected=!!value;updateCloudPanel();resolve(!!value)};
+    const channel=authClient.channel("diary:"+userId,{config:{private:true}})
+      .on("broadcast",{event:"diary_changed"},message=>{
+        const payload=message&&message.payload&&typeof message.payload==="object"?message.payload:message;
+        const revision=Number(payload&&payload.revision);
+        if(!Number.isSafeInteger(revision)||revision<1||revision<=Number(cloudRevision||0))return;
+        cloudQueuedRevision=Math.max(cloudQueuedRevision,revision);
+        if(cloudState==="checking"||cloudState==="disabled")return;
+        void handleDiaryBroadcast(revision);
+      });
+    cloudRealtimeChannel=channel;timer=setTimeout(()=>finish(false),6000);
+    channel.subscribe((status,error)=>{
+      if(status==="SUBSCRIBED")finish(true);
+      else if(status==="CHANNEL_ERROR"||status==="TIMED_OUT"||status==="CLOSED"){
+        if(error)console.warn("Diary Realtime subscription:",error.message||error);finish(false);
+      }
+    });
+  });
+}
+async function handleDiaryBroadcast(revisionHint){
+  cloudQueuedRevision=Math.max(cloudQueuedRevision,Number(revisionHint)||0);
+  if(cloudRemoteRefreshInFlight||!activeUser||cloudState==="checking"||cloudState==="disabled"||cloudState==="conflict")return;
+  if(cloudQueuedRevision<=Number(cloudRevision||0)){cloudQueuedRevision=0;return}
+  cloudRemoteRefreshInFlight=true;
+  try{
+    const remote=await requestSharedDiary();
+    if(!remote.exists){cloudRevision=null;cloudState="empty";cloudStatusMessage="";updateCloudPanel();return}
+    if(Number(remote.revision)<=Number(cloudRevision||0))return;
+    const localChanged=cloudDirty||!!cloudSaveTimer||cloudSaveInFlight||
+      (cloudLastSyncedData===null?hasRecords(data):comparableData(data)!==cloudLastSyncedData);
+    if(localChanged){
+      if(cloudSaveTimer){clearTimeout(cloudSaveTimer);cloudSaveTimer=null}
+      cloudPendingRemote={...remote,data:normalizeData(remote.data)};
+      cloudState="conflict";cloudStatusMessage="다른 기기에서 변경되었지만 이 브라우저에도 저장하지 않은 변경이 있습니다. 자동 덮어쓰기를 멈췄습니다.";
+      updateCloudPanel();return;
+    }
+    applySharedDiary(remote);
+  }catch(error){cloudStatusMessage=error&&error.message?error.message:"변경 알림 후 최신 기록을 읽지 못했습니다.";updateCloudPanel()}
+  finally{
+    cloudRemoteRefreshInFlight=false;const queued=cloudQueuedRevision;
+    if(queued<=Number(cloudRevision||0)||cloudState==="conflict")cloudQueuedRevision=0;
+    else if(queued>Number(cloudRevision||0))void handleDiaryBroadcast(queued);
+  }
+}
 function markCloudDirty(){
   const localComparable=comparableData(data);
   cloudDirty=cloudLastSyncedData===null||localComparable!==cloudLastSyncedData;
   if(cloudDirty)cloudExitFlushStarted=false;
+  if(!cloudDirty){if(cloudSaveTimer){clearTimeout(cloudSaveTimer);cloudSaveTimer=null}}
+  else if(cloudState==="ready"&&!cloudSaveInFlight)scheduleCloudWrite(650);
+  updateCloudPanel();
+}
+function scheduleCloudWrite(delay){
+  if(cloudState!=="ready"||!cloudDirty)return;
+  if(cloudSaveTimer)clearTimeout(cloudSaveTimer);
+  cloudSaveTimer=setTimeout(()=>{cloudSaveTimer=null;void flushCloudDiary()},typeof delay==="number"?delay:650);
   updateCloudPanel();
 }
 async function flushCloudDiary(options={}){
   const keepalive=options.keepalive===true;
   if(!activeUser)return false;
   if(cloudState!=="ready")return !cloudDirty;
-  const snapshot=normalizeData(data);
-  const snapshotComparable=comparableData(snapshot);
+  const snapshot=normalizeData(data),snapshotComparable=comparableData(snapshot);
   if(!cloudDirty&&snapshotComparable===cloudLastSyncedData)return true;
   if(cloudSaveInFlight)return false;
   if(keepalive&&cloudExitFlushStarted)return false;
-
-  cloudSaveInFlight=true;
-  if(keepalive)cloudExitFlushStarted=true;
-  updateCloudPanel();
+  if(cloudSaveTimer){clearTimeout(cloudSaveTimer);cloudSaveTimer=null}
+  cloudSaveInFlight=true;if(keepalive)cloudExitFlushStarted=true;updateCloudPanel();
   try{
-    let result;
-    if(keepalive){
-      // Best effort only: the browser may cancel page-close work, especially for large data.
-      const token=await getCurrentAccessToken();
-      const response=await fetch("/api/diary",{
-        method:"PUT",
-        cache:"no-store",
-        keepalive:true,
-        headers:{
-          "Content-Type":"application/json",
-          "Accept":"application/json",
-          "Authorization":"Bearer "+token
-        },
-        body:JSON.stringify({data:snapshot,expectedEtag:cloudBlobEtag||null})
-      });
-      result=await response.json().catch(()=>({}));
-      if(!response.ok||!result.ok){
-        const error=new Error(result.error||("HTTP "+response.status));
-        error.status=response.status;
-        throw error;
-      }
-    }else{
-      result=await writeSharedDiary(snapshot,cloudBlobEtag);
-    }
-    cloudBlobEtag=result.etag||null;
-    cloudUpdatedAt=result.updatedAt||cloudUpdatedAt;
-    storeCloudBaseline(snapshot);
-    cloudDirty=comparableData(data)!==snapshotComparable;
-    cloudStatusMessage="";
-    if(!keepalive)showToast(cloudDirty?"저장 후 추가 변경 사항이 남아 있어요. 다시 동기화해 주세요.":"중앙 저장소에 동기화했어요.");
+    const result=await writeSharedDiary(snapshot,cloudRevision);
+    cloudRevision=Number(result.revision);cloudUpdatedAt=result.updatedAt||cloudUpdatedAt;
+    storeCloudBaseline(snapshot);cloudDirty=comparableData(data)!==snapshotComparable;cloudStatusMessage="";
+    if(cloudDirty&&cloudState==="ready")scheduleCloudWrite(350);
+    if(!keepalive)showToast(cloudDirty?"DB 저장 후 추가 변경 사항이 남아 있어요.":"Supabase DB에 저장했어요.");
     return !cloudDirty;
   }catch(error){
-    cloudStatusMessage=error&&error.message?error.message:"중앙 저장 실패";
+    cloudStatusMessage=error&&error.message?error.message:"DB 저장 실패";
     if(error&&error.status===409){
-      cloudState="error";
-      cloudStatusMessage="다른 기기에서 먼저 변경되어 저장을 멈췄습니다. 기존 기록은 보존했습니다. ‘연결 다시 확인’을 눌러 최신 기록을 확인해 주세요.";
+      try{
+        const latest=await requestSharedDiary();
+        if(latest.exists){
+          cloudPendingRemote={...latest,data:normalizeData(latest.data)};cloudState="conflict";
+          cloudStatusMessage="다른 기기에서 먼저 DB 기록을 변경했습니다. 최신 기록과 비교한 뒤 선택해 주세요.";
+        }else cloudState="error";
+      }catch(readError){cloudState="error";cloudStatusMessage="DB 충돌을 확인하지 못했습니다. 로컬 기록은 유지됩니다."}
     }
-    if(!keepalive)showToast("중앙 저장에 실패했어요. 브라우저 기록은 유지됩니다.");
+    if(!keepalive)showToast("DB 저장에 실패했어요. 이 브라우저의 기록은 유지됩니다.");
     return false;
-  }finally{
-    cloudSaveInFlight=false;
-    updateCloudPanel();
-  }
+  }finally{cloudSaveInFlight=false;updateCloudPanel()}
 }
 async function uploadLocalDiaryToCloud(overwrite){
   if(cloudState!=="empty"&&!overwrite)return;
