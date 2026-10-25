@@ -2,7 +2,6 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { get, list, put } from "@vercel/blob";
 
 const USER_STORE_PREFIX = "mellow-diary/users/";
-const LEGACY_SHARED_STORE_PATH = "mellow-diary/shared-data-v1.json";
 const MAX_BYTES = 1024 * 1024;
 const MAX_RECORDS_PER_COLLECTION = 5000;
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -137,31 +136,6 @@ function cleanData(input) {
   const bytes = Buffer.byteLength(JSON.stringify(data), "utf8");
   if (bytes > MAX_BYTES) throw new Error("Diary data exceeds the 1 MiB limit");
   return data;
-}
-
-async function readLegacySharedDiary() {
-  const { blobs = [] } = await list({ prefix: LEGACY_SHARED_STORE_PATH, limit: 1 });
-  const blob = blobs.find((item) => item.pathname === LEGACY_SHARED_STORE_PATH);
-  if (!blob) return { exists: false, data: null, updatedAt: null };
-
-  let downloaded;
-  try {
-    downloaded = await get(blob.url, { access: "public", useCache: false });
-  } catch (publicReadError) {
-    // Compatibility fallback for a store whose old file was private.
-    downloaded = await get(blob.url, { access: "private", useCache: false });
-  }
-  if (!downloaded) return { exists: false, data: null, updatedAt: null };
-
-  const rawText = await new Response(downloaded.stream).text();
-  const record = JSON.parse(rawText);
-  const data = cleanData(record.data ?? record);
-  return {
-    exists: true,
-    data,
-    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : null,
-    legacySharedFile: true,
-  };
 }
 
 async function readUserDiary(pathname, user) {
