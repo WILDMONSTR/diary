@@ -265,13 +265,11 @@ function buildDiaryDelta(previousValue,nextValue){
     const newById=new Map(next[key].map(item=>[String(item.id),item]));
     const upsert=[];
     for(const item of next[key]){
-      const keyId=String(item.id),old=oldById.get(keyId);
+      const idValue=String(item.id),old=oldById.get(idValue);
       if(!old||JSON.stringify(old)!==JSON.stringify(item))upsert.push(item);
     }
     const deleted=[];
-    for(const item of previous[key]){
-      if(!newById.has(String(item.id)))deleted.push(String(item.id));
-    }
+    for(const item of previous[key])if(!newById.has(String(item.id)))deleted.push(String(item.id));
     changes[key]={upsert,delete:deleted};
   }
   return changes;
@@ -285,7 +283,14 @@ function baselineDataOrBlank(){
   try{return cloudLastSyncedData?normalizeData(JSON.parse(cloudLastSyncedData)):blank()}
   catch(error){return blank()}
 }
-
+function orderLoadedDiary(loaded){
+  loaded.plans.sort((a,b)=>String(a.createdAt||"").localeCompare(String(b.createdAt||"")));
+  loaded.tasks.sort((a,b)=>(Number(a.sequenceNo)||0)-(Number(b.sequenceNo)||0));
+  loaded.runs.sort((a,b)=>String(a.createdAt||a.startedAt||"").localeCompare(String(b.createdAt||b.startedAt||"")));
+  loaded.completionEvents.sort((a,b)=>String(a.at||"").localeCompare(String(b.at||"")));
+  loaded.entries.sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))||String(a.createdAt||"").localeCompare(String(b.createdAt||"")));
+  return loaded;
+}
 async function requestSharedDiary(){
   if(!authClient||!activeUser)throw new Error("먼저 로그인해 주세요.");
   const [itemsResult,stateResult]=await Promise.all([
@@ -294,27 +299,18 @@ async function requestSharedDiary(){
   ]);
   if(itemsResult.error)throw new Error(itemsResult.error.message||"Supabase DB에서 기록을 읽지 못했습니다.");
   if(stateResult.error)throw new Error(stateResult.error.message||"Supabase DB 동기화 버전을 읽지 못했습니다.");
-  const rows=itemsResult.data||[];
-  const state=stateResult.data;
+  const rows=itemsResult.data||[],state=stateResult.data;
   if(!state){
     if(rows.length)throw new Error("동기화 버전 없이 저장된 기록이 발견되었습니다. 데이터를 안전하게 보존한 뒤 지원이 필요합니다.");
     return {ok:true,exists:false,data:null,revision:null,updatedAt:null};
   }
-  const loaded=blank();
-  const collections=new Set(["plans","tasks","runs","completionEvents","entries"]);
+  const loaded=blank(),collections=new Set(["plans","tasks","runs","completionEvents","entries"]);
   for(const row of rows){
     if(!collections.has(row.collection)||!row.item||typeof row.item!=="object"||Array.isArray(row.item))continue;
     loaded[row.collection].push(row.item);
   }
-  // Stable ordering when reassembling the per-record rows. Views still apply their own filters/sorts.
-  loaded.plans.sort((a,b)=>String(a.createdAt||"").localeCompare(String(b.createdAt||"")));
-  loaded.tasks.sort((a,b)=>(Number(a.sequenceNo)||0)-(Number(b.sequenceNo)||0));
-  loaded.runs.sort((a,b)=>String(a.createdAt||a.startedAt||"").localeCompare(String(b.createdAt||b.startedAt||"")));
-  loaded.completionEvents.sort((a,b)=>String(a.at||"").localeCompare(String(b.at||"")));
-  loaded.entries.sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))||String(a.createdAt||"").localeCompare(String(b.createdAt||"")));
-  return {ok:true,exists:true,data:normalizeData(loaded),revision:Number(state.revision),updatedAt:state.updated_at||null};
+  return {ok:true,exists:true,data:normalizeData(orderLoadedDiary(loaded)),revision:Number(state.revision),updatedAt:state.updated_at||null};
 }
-
 async function writeSharedDiary(candidate,expectedRevision,baseData){
   if(!authClient||!activeUser)throw new Error("먼저 로그인해 주세요.");
   const normalized=normalizeData(candidate);
@@ -322,7 +318,6 @@ async function writeSharedDiary(candidate,expectedRevision,baseData){
   if(baseData!==undefined&&baseData!==null)previous=normalizeData(baseData);
   else if(expectedRevision===null||expectedRevision===undefined)previous=blank();
   else previous=baselineDataOrBlank();
-
   const changes=buildDiaryDelta(previous,normalized);
   if(!hasDiaryDelta(changes)){
     return {
@@ -331,22 +326,17 @@ async function writeSharedDiary(candidate,expectedRevision,baseData){
       updatedAt:cloudUpdatedAt,unchanged:true
     };
   }
-
   const {data:result,error}=await authClient.rpc("apply_diary_delta",{
     p_expected_revision:expectedRevision===null||expectedRevision===undefined?null:Number(expectedRevision),
     p_changes:changes
   });
   if(error){
     const conflict=error.code==="40001"||/diary revision conflict/i.test(error.message||"");
-    const failure=new Error(conflict
-      ?"다른 기기에서 먼저 DB 기록을 만들거나 변경했습니다."
-      :(error.message||"Supabase DB에 변경 사항을 저장하지 못했습니다."));
+    const failure=new Error(conflict?"다른 기기에서 먼저 DB 기록을 만들거나 변경했습니다.":(error.message||"Supabase DB에 변경 사항을 저장하지 못했습니다."));
     failure.status=conflict?409:500;failure.code=error.code;throw failure;
   }
   const saved=Array.isArray(result)?result[0]:result;
-  if(!saved||!Number.isFinite(Number(saved.revision))){
-    const failure=new Error("DB가 저장 버전을 반환하지 않았습니다.");failure.status=500;throw failure;
-  }
+  if(!saved||!Number.isFinite(Number(saved.revision))){const failure=new Error("DB가 저장 버전을 반환하지 않았습니다.");failure.status=500;throw failure}
   return {ok:true,exists:true,data:normalized,revision:Number(saved.revision),updatedAt:saved.updated_at||null};
 }
 
@@ -366,10 +356,17 @@ async function importLegacyBlobDiary(){
     const legacy=await requestLegacyBlobDiary();
     if(!legacy.exists||!legacy.data||!hasRecords(legacy.data)){showToast("가져올 이전 Blob 기록을 찾지 못했습니다. Blob 저장소가 정지되었는지도 확인해 주세요.");return}
     if(hasRecords(data)){if(!confirm("현재 브라우저 기록을 JSON 백업으로 저장한 다음 Blob 기록으로 바꿔 DB에 복사할까요?"))return;exportData()}
-    cloudSaveInFlight=true;
-    let saved;
-    try{saved=await writeSharedDiary(legacy.data,null)}finally{cloudSaveInFlight=false}
-    applySharedDiary(saved);showToast("이전 Blob 기록을 Supabase DB로 복사했습니다. Blob 원본은 그대로 보존됩니다.");
+    cloudSaveInFlight=true;updateCloudPanel();
+    try{
+      const saved=await writeSharedDiary(legacy.data,null);
+      applySharedDiary(saved);
+      showToast("이전 Blob 기록을 Supabase DB로 복사했습니다. Blob 원본은 그대로 보존됩니다.");
+    }finally{
+      cloudSaveInFlight=false;updateCloudPanel();
+      const queued=cloudQueuedRevision;
+      if(queued<=Number(cloudRevision||0)){cloudQueuedRevision=0;cloudQueuedBroadcast=null;}
+      else if(cloudState!=="conflict")void handleDiaryBroadcast(cloudQueuedBroadcast||{revision:queued,full_refresh:true});
+    }
   }catch(error){cloudStatusMessage=error&&error.message?error.message:"이전 Blob 기록을 읽지 못했습니다.";updateCloudPanel();showToast("Blob 가져오기에 실패했어요. 기존 데이터는 변경하지 않았습니다.")}
 }
 
