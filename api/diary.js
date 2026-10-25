@@ -110,7 +110,7 @@ function cleanData(input) {
 }
 
 async function readUserDiary(pathname) {
-  const { blobs = [] } = await list({ prefix: pathname });
+  const { blobs = [] } = await list({ prefix: pathname, limit: 1 });
   const blob = blobs.find((item) => item.pathname === pathname);
   if (!blob) return { exists: false, data: null, updatedAt: null };
 
@@ -124,6 +124,7 @@ async function readUserDiary(pathname) {
     exists: true,
     data,
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : null,
+    etag: blob.etag || downloaded.etag || null,
   };
 }
 
@@ -168,20 +169,40 @@ export default async function handler(req, res) {
     const data = cleanData(body?.data);
     const updatedAt = new Date().toISOString();
     const contents = JSON.stringify({ schemaVersion: 1, updatedAt, data });
-
-    await put(pathname, contents, {
+    const expectedEtag = typeof body?.expectedEtag === "string" ? body.expectedEtag.trim() : "";
+    // Existing blobs are updated only if their ETag still matches the last read.
+    // A first write does not overwrite a blob created concurrently by another device.
+    const writeOptions = {
       access: "private",
       addRandomSuffix: false,
-      allowOverwrite: true,
       contentType: "application/json",
-    });
+      ...(expectedEtag
+        ? { allowOverwrite: true, ifMatch: expectedEtag }
+        : { allowOverwrite: false }),
+    };
+    const savedBlob = await put(pathname, contents, writeOptions);
 
-    return send(res, 200, { ok: true, exists: true, updatedAt });
+    return send(res, 200, {
+      ok: true,
+      exists: true,
+      updatedAt,
+      etag: savedBlob?.etag || null,
+    });
   } catch (error) {
     const message = String(error?.message || "");
-    const status = /exceeds|must be|invalid record|data\./i.test(message) ? 400 : 503;
+    const isConflict =
+      error?.name === "BlobPreconditionFailedError" ||
+      error?.name === "BlobAlreadyExistsError" ||
+      /precondition|etag|already exists|already been created|overwrite/i.test(message);
+    const status = /exceeds|must be|invalid record|data\./i.test(message)
+      ? 400
+      : isConflict
+        ? 409
+        : 503;
     if (status === 400) {
       console.warn("User diary cloud write rejected:", message);
+    } else if (status === 409) {
+      console.warn("User diary cloud write conflict:", message);
     } else {
       console.error("User diary cloud write failed:", error?.message || error);
     }
@@ -189,7 +210,9 @@ export default async function handler(req, res) {
       ok: false,
       error: status === 400
         ? message
-        : "이 계정의 다이어리에 저장하지 못했습니다. Blob 연결 또는 사용 한도를 확인해 주세요.",
+        : status === 409
+          ? "중앙 기록이 다른 기기에서 먼저 변경되었거나 새로 생성되었습니다. 기존 로컬 기록은 보존했습니다. 다시 동기화해 최신 기록을 확인해 주세요."
+          : "이 계정의 다이어리에 저장하지 못했습니다. Blob 연결 또는 사용 한도를 확인해 주세요.",
     });
   }
 }
