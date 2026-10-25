@@ -286,24 +286,34 @@ async function persistCloudBlobPointer(result){
   }
 }
 async function requestSharedDiary(){
-  const token=await getCurrentAccessToken();
-  const response=await fetch("/api/diary?ts="+Date.now(),{method:"GET",cache:"no-store",headers:{"Accept":"application/json","Authorization":"Bearer "+token}});
-  const result=await response.json().catch(()=>({}));
-  if(!response.ok||!result.ok)throw new Error(result.error||("HTTP "+response.status));
-  await persistCloudBlobPointer(result);
-  return result;
+  if(!authClient||!activeUser)throw new Error("먼저 로그인해 주세요.");
+  const {data:row,error}=await authClient.from("diary_documents")
+    .select("data,revision,updated_at").eq("user_id",activeUser.id).maybeSingle();
+  if(error)throw new Error(error.message||"Supabase DB에서 기록을 읽지 못했습니다.");
+  if(!row)return {ok:true,exists:false,data:null,revision:null,updatedAt:null};
+  return {ok:true,exists:true,data:normalizeData(row.data),revision:Number(row.revision),updatedAt:row.updated_at||null};
 }
-async function writeSharedDiary(candidate,expectedEtag){
-  const token=await getCurrentAccessToken();
-  const response=await fetch("/api/diary",{method:"PUT",cache:"no-store",headers:{"Content-Type":"application/json","Accept":"application/json","Authorization":"Bearer "+token},body:JSON.stringify({data:candidate,expectedEtag:expectedEtag||null})});
-  const result=await response.json().catch(()=>({}));
-  if(!response.ok||!result.ok){
-    const error=new Error(result.error||("HTTP "+response.status));
-    error.status=response.status;
-    throw error;
+
+async function writeSharedDiary(candidate,expectedRevision){
+  if(!authClient||!activeUser)throw new Error("먼저 로그인해 주세요.");
+  const normalized=normalizeData(candidate);let row=null,error=null;
+  if(expectedRevision===null||expectedRevision===undefined){
+    const result=await authClient.from("diary_documents").insert({user_id:activeUser.id,data:normalized})
+      .select("revision,updated_at").maybeSingle();
+    row=result.data;error=result.error;
+  }else{
+    const result=await authClient.from("diary_documents").update({data:normalized})
+      .eq("user_id",activeUser.id).eq("revision",Number(expectedRevision))
+      .select("revision,updated_at").maybeSingle();
+    row=result.data;error=result.error;
   }
-  await persistCloudBlobPointer(result);
-  return result;
+  if(error){
+    const conflict=error.code==="23505"||error.code==="40001";
+    const failure=new Error(conflict?"다른 기기에서 먼저 DB 기록을 만들거나 변경했습니다.":(error.message||"Supabase DB에 기록을 저장하지 못했습니다."));
+    failure.status=conflict?409:500;failure.code=error.code;throw failure;
+  }
+  if(!row){const failure=new Error("다른 기기에서 먼저 DB 기록을 변경했습니다. 최신 기록을 확인해야 합니다.");failure.status=409;throw failure;}
+  return {ok:true,exists:true,data:normalized,revision:Number(row.revision),updatedAt:row.updated_at||null};
 }
 
 function applySharedDiary(result){
