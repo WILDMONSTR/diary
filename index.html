@@ -722,7 +722,8 @@ setPage("home");
 history.replaceState(pageHistoryState("home"),"",pageHistoryUrl("home"));
 updateCloudPanel();
 initializeCloudSync();
-// Automatic reads happen on login/access only; closing the page triggers one best-effort pending write.
+// Start the best-effort write when the tab becomes hidden, then guard against duplicate pagehide writes.
+document.addEventListener("visibilitychange",()=>{if(document.hidden)void flushCloudDiary({keepalive:true})});
 window.addEventListener("pagehide",()=>{void flushCloudDiary({keepalive:true})});
 
 function setAuthMessage(message,isError){
