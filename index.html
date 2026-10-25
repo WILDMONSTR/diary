@@ -151,7 +151,7 @@ const labels={home:["YOUR PERSONAL SPACE","오늘의 페이지를 펼쳐요 ✎"
 const blank=()=>({plans:[],tasks:[],runs:[],completionEvents:[],entries:[]});
 let data=blank(),page="home",query="",statusFilter="all",priorityFilter="all",tagFilter="",planFilter="",sortMode="sequence",priorityOrder="asc",toastTimer;
 const lastCompletionClick=new Map();
-let cloudState="disabled",cloudUpdatedAt=null,cloudBlobEtag=null,cloudSaveTimer=null,cloudSaveInFlight=false,cloudPendingRemote=null,cloudStatusMessage="로그인 후 계정별 중앙 저장소에 연결합니다.",lastLocalEditAt=0,cloudLastSyncedData=null,cloudDirty=false,cloudExitFlushStarted=false;
+let cloudState="disabled",cloudUpdatedAt=null,cloudRevision=null,cloudSaveTimer=null,cloudSaveInFlight=false,cloudPendingRemote=null,cloudStatusMessage="로그인 후 Supabase DB에 연결합니다.",lastLocalEditAt=0,cloudLastSyncedData=null,cloudDirty=false,cloudExitFlushStarted=false,cloudRealtimeChannel=null,cloudRealtimeConnected=false,cloudRemoteRefreshInFlight=false,cloudQueuedRevision=0;
 function normalizeData(input){const d=input&&typeof input==="object"?input:{};const rawEvents=Array.isArray(d.completionEvents)?d.completionEvents:[];const completionEvents=rawEvents.filter(e=>e&&typeof e==="object").map(e=>({id:String(e.id||id()),taskId:String(e.taskId||""),taskTitleSnapshot:String(e.taskTitleSnapshot||"완료한 할 일"),cycleKey:String(e.cycleKey||"1"),at:validDateString(e.at)?String(e.at):nowISO()}));const cycleByTask={};completionEvents.forEach(e=>{const n=Number(e.cycleKey)||0;cycleByTask[e.taskId]=Math.max(cycleByTask[e.taskId]||0,n)});const plans=(Array.isArray(d.plans)?d.plans:[]).filter(p=>p&&typeof p==="object").map(p=>({...p,id:String(p.id||id()),title:String(p.title||"제목 없는 계획"),category:String(p.category||"기타"),description:String(p.description||""),startDate:String(p.startDate||""),endDate:String(p.endDate||""),successCriteria:String(p.successCriteria||""),priority:normalizePriority(p.priority),estimatedMinutes:safeMinutes(p.estimatedMinutes),status:["active","paused","done"].includes(p.status)?p.status:"active",versionNo:Math.max(1,Number(p.versionNo)||1),history:Array.isArray(p.history)?p.history.filter(h=>h&&typeof h==="object").map(h=>({...h,title:String(h.title||"제목 없는 계획"),category:String(h.category||"기타"),description:String(h.description||""),startDate:String(h.startDate||""),endDate:String(h.endDate||""),successCriteria:String(h.successCriteria||""),priority:normalizePriority(h.priority),estimatedMinutes:safeMinutes(h.estimatedMinutes),version:Math.max(1,Number(h.version)||1),savedAt:validDateString(h.savedAt)?String(h.savedAt):nowISO()})):[],createdAt:validDateString(p.createdAt)?String(p.createdAt):nowISO(),updatedAt:validDateString(p.updatedAt)?String(p.updatedAt):(validDateString(p.createdAt)?String(p.createdAt):nowISO())}));const usedSequenceNumbers=new Set();
 const tasks=(Array.isArray(d.tasks)?d.tasks:[]).filter(t=>t&&typeof t==="object").map((t,index)=>{
   let sequenceNo=Number(t.sequenceNo);
@@ -227,28 +227,24 @@ function downloadPreSyncLocalBackup(){
   }catch(error){showToast("보관된 로컬 백업을 찾지 못했어요.")}
 }
 function updateCloudPanel(){
-  const panel=document.getElementById("cloudSyncPanel");
-  if(!panel)return;
-  const actions=(items)=>'<div class="cloud-sync-actions">'+items.join("")+'</div>';
+  const panel=document.getElementById("cloudSyncPanel");if(!panel)return;
+  const actions=items=>'<div class="cloud-sync-actions">'+items.join("")+'</div>';
   const button=(action,label,klass)=>'<button type="button" class="btn '+(klass||"btn-white")+'" data-action="'+action+'">'+label+'</button>';
-  if(cloudState==="disabled"){
-    panel.innerHTML='<strong>로그인 후 계정별로 저장합니다.</strong><p>로그인한 계정만 자신의 기록을 읽고 수정할 수 있습니다.</p><p class="cloud-muted">로그아웃 상태에서는 다이어리 데이터가 표시되지 않습니다.</p>';
-  }else if(cloudState==="checking"){
-    panel.innerHTML='<strong>내 계정의 중앙 저장소를 확인 중…</strong><p>이 브라우저의 기존 기록은 아직 덮어쓰지 않았어요.</p>';
-  }else if(cloudState==="empty"){
-    const count=recordsSummary(data);
-    panel.innerHTML='<strong>이 계정의 중앙 저장소가 아직 비어 있어요.</strong><p>'+(count>0?'이 브라우저에 기록 '+count+'개가 있습니다. 이 기록을 이 계정의 중앙 저장소에 처음 업로드할 수 있어요.':'새 기록을 만들면 이 계정의 중앙 저장소에 자동 저장됩니다.')+'</p><p class="cloud-muted">기존 로컬 기록은 업로드를 확인하기 전까지 자동으로 서버에 보내지 않습니다.</p>'+(count>0?actions([button("cloud-upload-local","이 계정의 기존 기록을 처음 업로드","btn-primary")]):"");
+  if(cloudState==="disabled")panel.innerHTML='<strong>로그인 후 계정별로 저장합니다.</strong><p>로그인한 계정만 자신의 기록을 읽고 수정할 수 있습니다.</p><p class="cloud-muted">Supabase DB가 기록을 보관하고 Realtime은 변경 알림만 전달합니다.</p>';
+  else if(cloudState==="checking")panel.innerHTML='<strong>Supabase DB 기록을 확인 중…</strong><p>이 브라우저의 기존 기록은 덮어쓰기 전에 비교합니다.</p>';
+  else if(cloudState==="empty"){
+    const count=recordsSummary(data),items=[];
+    if(count>0)items.push(button("cloud-upload-local","이 브라우저 기록을 DB에 업로드","btn-primary"));
+    items.push(button("cloud-import-blob","이전 Blob 기록 가져오기","btn-white"));
+    panel.innerHTML='<strong>이 계정의 Supabase DB 기록이 아직 비어 있어요.</strong><p>'+(count>0?'이 브라우저에 기록 '+count+'개가 있습니다. JSON 백업을 확인한 뒤 DB로 옮길 수 있어요.':'기록을 만들면 이 계정의 DB에 자동 저장됩니다.')+'</p><p class="cloud-muted">이전 Blob 가져오기는 직접 실행할 때만 시도하며, 기존 Blob 파일은 삭제하지 않습니다.</p>'+actions(items);
   }else if(cloudState==="ready"){
     const extraButtons=[];
     if(hasPreSyncBackup())extraButtons.push(button("cloud-download-pre-sync-backup","이전 로컬 기록 백업 다운로드","btn-white"));
-    if(cloudDirty)extraButtons.push(button("cloud-retry-save","지금 중앙에 동기화","btn-primary"));
+    if(cloudDirty)extraButtons.push(button("cloud-retry-save","지금 DB에 동기화","btn-primary"));
     else if(cloudStatusMessage)extraButtons.push(button("cloud-retry","연결 다시 확인","btn-white"));
-    panel.innerHTML='<strong>내 계정의 중앙 저장소 연결됨 ✓</strong><p>접속할 때 중앙 기록을 한 번 불러옵니다. 변경 사항은 브라우저에 즉시 보관하고, 로그아웃하거나 웹 페이지를 닫을 때 중앙 저장을 시도합니다.</p><p class="cloud-muted">정기적인 4초 폴링과 저장 전 중복 조회를 제거했습니다. 다른 기기 변경 사항은 이 계정으로 다시 접속할 때 확인되며, 동시에 수정하면 ETag 확인으로 덮어쓰기를 막습니다.</p>'+(cloudSaveInFlight?'<p>중앙 저장 중…</p>':(cloudDirty?'<p>변경 사항이 중앙 저장 대기 중입니다.</p>':(cloudStatusMessage?'<p class="cloud-error">'+esc(cloudStatusMessage)+'</p>':'')))+(extraButtons.length?actions(extraButtons):"");
-  }else if(cloudState==="conflict"){
-    panel.innerHTML='<strong>이 브라우저와 이 계정의 중앙 기록이 서로 달라요.</strong><p>안전을 위해 자동으로 덮어쓰지 않았습니다. 먼저 필요한 경우 JSON 백업을 보관한 뒤 어느 쪽을 사용할지 선택하세요.</p><p class="cloud-muted">“중앙 계정 기록 사용”은 이 브라우저의 기록을 백업한 뒤 중앙 기록을 불러옵니다. “이 브라우저 기록 업로드”는 이 계정의 중앙 기록을 덮어씁니다.</p>'+actions([button("cloud-use-remote","중앙 계정 기록 사용","btn-white"),button("cloud-overwrite-remote","이 브라우저 기록 업로드","btn-primary")]);
-  }else{
-    panel.innerHTML='<strong class="cloud-error">내 계정의 중앙 저장소에 연결하지 못했어요.</strong><p>'+esc(cloudStatusMessage||"인증 세션이나 Blob 연결 설정을 확인해 주세요.")+'</p><p class="cloud-muted">이 계정의 브라우저 기록은 localStorage에 남아 있습니다. 연결이 확인될 때까지 사이트 데이터를 지우지 마세요.</p>'+actions([button("cloud-retry","연결 다시 확인","btn-primary"),button("export-data","JSON 백업 다운로드","btn-white")]);
-  }
+    panel.innerHTML='<strong>Supabase DB 연결됨 ✓</strong><p>기록은 DB에 저장되고, 다른 기기의 변경 알림을 받았을 때만 최신 데이터를 다시 읽습니다.</p><p class="cloud-muted">'+(cloudRealtimeConnected?'실시간 알림 연결됨.':'실시간 알림에 연결되지 않았습니다. 저장 기능은 계속 사용할 수 있습니다.')+' 알림에는 버전 정보만 포함하며 다이어리 본문은 전송하지 않습니다. 동시에 수정하면 자동 덮어쓰기를 멈춥니다.</p>'+(cloudSaveInFlight?'<p>DB 저장 중…</p>':(cloudDirty?'<p>변경 사항을 DB에 저장 중입니다.</p>':(cloudStatusMessage?'<p class="cloud-error">'+esc(cloudStatusMessage)+'</p>':'')))+(extraButtons.length?actions(extraButtons):"");
+  }else if(cloudState==="conflict")panel.innerHTML='<strong>이 브라우저와 중앙 DB 기록이 서로 달라요.</strong><p>안전을 위해 자동으로 덮어쓰지 않았습니다. 필요한 경우 먼저 JSON 백업을 보관한 뒤 어느 쪽을 사용할지 선택하세요.</p><p class="cloud-muted">“중앙 DB 기록 사용”은 이 브라우저 기록을 백업한 뒤 DB 기록을 불러옵니다. “이 브라우저 기록 업로드”는 DB 기록을 교체합니다.</p>'+actions([button("cloud-use-remote","중앙 DB 기록 사용","btn-white"),button("cloud-overwrite-remote","이 브라우저 기록 업로드","btn-primary")]);
+  else panel.innerHTML='<strong class="cloud-error">Supabase DB에 연결하지 못했어요.</strong><p>'+esc(cloudStatusMessage||"로그인 세션, DB 권한 또는 Realtime 설정을 확인해 주세요.")+'</p><p class="cloud-muted">이 브라우저의 기록은 localStorage에 남아 있습니다. 기존 Blob과 백업 파일은 이 변경으로 삭제하지 않았습니다.</p>'+actions([button("cloud-retry","연결 다시 확인","btn-primary"),button("export-data","JSON 백업 다운로드","btn-white")]);
 }
 
 async function getCurrentAccessToken(){
@@ -258,32 +254,6 @@ async function getCurrentAccessToken(){
   const token=sessionData&&sessionData.session&&sessionData.session.access_token;
   if(!token)throw new Error("로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
   return token;
-}
-async function persistCloudBlobPointer(result){
-  if(!authClient||!activeUser||!result)return;
-  const metadata=activeUser.user_metadata||{};
-  const hasPointer=Boolean(metadata.personal_diary_blob_url||metadata.personal_diary_blob_signature);
-  let nextMetadata=null;
-  if(result.blobUrl&&result.blobSignature){
-    if(metadata.personal_diary_blob_url===result.blobUrl&&metadata.personal_diary_blob_signature===result.blobSignature)return;
-    nextMetadata={
-      personal_diary_blob_url:result.blobUrl,
-      personal_diary_blob_signature:result.blobSignature
-    };
-  }else if(result.clearBlobPointer&&hasPointer){
-    nextMetadata={personal_diary_blob_url:null,personal_diary_blob_signature:null};
-  }
-  if(!nextMetadata)return;
-  try{
-    const {data,error}=await authClient.auth.updateUser({data:nextMetadata});
-    if(error){
-      console.warn("Could not cache the signed diary Blob pointer in account metadata:",error.message||error);
-      return;
-    }
-    if(data&&data.user&&data.user.id===activeUser.id)activeUser=data.user;
-  }catch(error){
-    console.warn("Could not cache the signed diary Blob pointer in account metadata:",error&&error.message?error.message:error);
-  }
 }
 async function requestSharedDiary(){
   if(!authClient||!activeUser)throw new Error("먼저 로그인해 주세요.");
@@ -314,6 +284,27 @@ async function writeSharedDiary(candidate,expectedRevision){
   }
   if(!row){const failure=new Error("다른 기기에서 먼저 DB 기록을 변경했습니다. 최신 기록을 확인해야 합니다.");failure.status=409;throw failure;}
   return {ok:true,exists:true,data:normalized,revision:Number(row.revision),updatedAt:row.updated_at||null};
+}
+
+async function requestLegacyBlobDiary(){
+  const token=await getCurrentAccessToken();
+  const response=await fetch("/api/diary?legacyImport=1&ts="+Date.now(),{method:"GET",cache:"no-store",headers:{"Accept":"application/json","Authorization":"Bearer "+token}});
+  const result=await response.json().catch(()=>({}));
+  if(!response.ok||!result.ok)throw new Error(result.error||("HTTP "+response.status));
+  return result;
+}
+async function importLegacyBlobDiary(){
+  if(cloudState!=="empty"){showToast("DB가 비어 있을 때만 이전 Blob 기록을 가져올 수 있습니다.");return}
+  if(!confirm("이전 Vercel Blob의 내 계정 기록을 읽어 Supabase DB로 복사합니다. Blob 원본 파일은 삭제하지 않습니다. 계속할까요?"))return;
+  try{
+    const current=await requestSharedDiary();
+    if(current.exists){showToast("이미 DB에 기록이 생겼습니다. Blob 가져오기를 중지했습니다.");await initializeCloudSync();return}
+    const legacy=await requestLegacyBlobDiary();
+    if(!legacy.exists||!legacy.data||!hasRecords(legacy.data)){showToast("가져올 이전 Blob 기록을 찾지 못했습니다. Blob 저장소가 정지되었는지도 확인해 주세요.");return}
+    if(hasRecords(data)){if(!confirm("현재 브라우저 기록을 JSON 백업으로 저장한 다음 Blob 기록으로 바꿔 DB에 복사할까요?"))return;exportData()}
+    const saved=await writeSharedDiary(legacy.data,null);
+    applySharedDiary(saved);showToast("이전 Blob 기록을 Supabase DB로 복사했습니다. Blob 원본은 그대로 보존됩니다.");
+  }catch(error){cloudStatusMessage=error&&error.message?error.message:"이전 Blob 기록을 읽지 못했습니다.";updateCloudPanel();showToast("Blob 가져오기에 실패했어요. 기존 데이터는 변경하지 않았습니다.")}
 }
 
 function applySharedDiary(result){
@@ -515,28 +506,13 @@ async function flushCloudDiary(options={}){
 async function uploadLocalDiaryToCloud(overwrite){
   if(cloudState!=="empty"&&!overwrite)return;
   if(!overwrite&&!hasRecords(data)){showToast("업로드할 기존 기록이 없습니다.");return}
-  const prompt=overwrite
-    ?"이 계정의 중앙 기록을 이 브라우저의 기록으로 교체합니다. 이 계정의 다른 기기에서 아직 동기화하지 않은 변경 사항은 사라질 수 있습니다. JSON 백업을 확인했고 계속할까요?"
-    :"이 브라우저의 기존 기록을 현재 로그인한 계정의 중앙 저장소에 처음 업로드할까요? 다른 계정의 기록은 변경하지 않습니다.";
+  const prompt=overwrite?"이 계정의 DB 기록을 이 브라우저 기록으로 교체합니다. 다른 기기의 변경을 확인했고 JSON 백업도 보관했나요?":"이 브라우저 기록을 현재 계정의 Supabase DB에 처음 저장할까요? 다른 계정 기록은 변경하지 않습니다.";
   if(!confirm(prompt))return;
   try{
-    const expectedEtag=overwrite?(cloudPendingRemote?.etag||cloudBlobEtag):null;
-    const result=await writeSharedDiary(data,expectedEtag);
-    cloudUpdatedAt=result.updatedAt||null;
-    cloudBlobEtag=result.etag||null;
-    cloudDirty=false;
-    cloudExitFlushStarted=false;
-    storeCloudBaseline(data);
-    cloudState="ready";
-    cloudPendingRemote=null;
-    cloudStatusMessage="";
-    updateCloudPanel();
-    showToast("이 계정의 기록을 중앙 저장소에 업로드했습니다.");
-  }catch(error){
-    cloudStatusMessage=error&&error.message?error.message:"업로드 실패";
-    updateCloudPanel();
-    showToast("중앙 업로드에 실패했어요. JSON 백업을 유지해 주세요.");
-  }
+    const expectedRevision=overwrite?(cloudPendingRemote?.revision??cloudRevision):null;
+    const result=await writeSharedDiary(data,expectedRevision);
+    applySharedDiary({...result,data});showToast("이 계정의 기록을 Supabase DB에 저장했습니다.");
+  }catch(error){cloudStatusMessage=error&&error.message?error.message:"DB 업로드 실패";updateCloudPanel();showToast("DB 업로드에 실패했어요. 브라우저 기록은 유지됩니다.")}
 }
 async function pullSharedDiary(){
   if(cloudSaveTimer||cloudSaveInFlight){
@@ -574,24 +550,17 @@ async function usePendingCloudDiary(){
 }
 async function overwriteCloudWithLocal(){
   if(!cloudPendingRemote)return;
-  const prompt="이 브라우저의 기록으로 이 계정의 중앙 기록을 교체합니다. 같은 계정의 다른 기기에서 아직 동기화하지 않은 변경 사항은 사라질 수 있습니다. JSON 백업을 확인했고 계속할까요?";
-  if(!confirm(prompt))return;
+  if(!confirm("이 브라우저 기록으로 Supabase DB의 최신 기록을 교체합니다. JSON 백업을 확인했고 계속할까요?"))return;
   try{
-    const result=await writeSharedDiary(data,cloudPendingRemote?.etag||cloudBlobEtag);
-    cloudUpdatedAt=result.updatedAt||null;
-    cloudBlobEtag=result.etag||null;
-    cloudDirty=false;
-    cloudExitFlushStarted=false;
-    cloudState="ready";
-    storeCloudBaseline(data);
-    cloudPendingRemote=null;
-    cloudStatusMessage="";
-    updateCloudPanel();
-    showToast("이 브라우저의 기록을 중앙에 업로드했습니다.");
+    const result=await writeSharedDiary(data,cloudPendingRemote?.revision??cloudRevision);
+    applySharedDiary({...result,data});showToast("이 브라우저 기록을 DB에 저장했습니다.");
   }catch(error){
-    cloudStatusMessage=error&&error.message?error.message:"업로드 실패";
-    updateCloudPanel();
-    showToast("업로드에 실패했습니다. 기존 기록은 유지됩니다.");
+    cloudStatusMessage=error&&error.message?error.message:"DB 덮어쓰기 실패";
+    if(error.status===409){
+      try{const latest=await requestSharedDiary();if(latest.exists)cloudPendingRemote={...latest,data:normalizeData(latest.data)}}catch(e){}
+      cloudState="conflict";cloudStatusMessage="저장 중 다른 기기에서 다시 변경되었습니다. 최신 기록을 확인해 주세요.";
+    }
+    updateCloudPanel();showToast("DB 저장에 실패했습니다. 기록은 유지됩니다.");
   }
 }
 function id(){return (typeof crypto!=="undefined"&&crypto.randomUUID)?crypto.randomUUID():("id-"+Date.now()+"-"+Math.random().toString(36).slice(2,10))}
@@ -770,7 +739,7 @@ function exportCsv(){const columns=["자료 종류","ID","날짜","제목","본�
 function exportTxt(){const out=["Personal Diary · 전체 자료 내보내기","내보낸 시각: "+nowISO(),"","=== 계획 ("+data.plans.length+") ==="];data.plans.forEach(p=>out.push("["+p.title+"]","ID: "+p.id,"분류: "+p.category,"상태: "+p.status,"우선순위: "+priorityNumber(p.priority),"기간: "+(p.startDate||"미정")+" ~ "+(p.endDate||"미정"),"예상 시간: "+fmtMinutes(p.estimatedMinutes),"설명: "+(p.description||""),"성공 기준: "+(p.successCriteria||""),"변경 이력: "+JSON.stringify(p.history||[]),""));out.push("=== 할 일 ("+data.tasks.length+") ===");data.tasks.forEach(t=>out.push("["+t.title+"]","ID: "+t.id,"계획: "+planLabel(t.planId),"상태: "+statusLabel(t.status),"저장 순서 번호: "+t.sequenceNo,"마감: "+(t.dueDate||"미정"),"예상 시간: "+fmtMinutes(t.estimatedMinutes),"태그: "+(t.tags||[]).join(", "),"설명: "+(t.description||""),"생성: "+(t.createdAt||""),"완료: "+(t.completedAt||"미완료"),""));out.push("=== 실행 기록 ("+data.runs.length+") ===");data.runs.forEach(r=>out.push("["+(r.title||r.taskTitleSnapshot||"실행 기록")+"]","ID: "+r.id,"시작: "+(r.startedAt||""),"종료: "+(r.endedAt||""),"실행 시간: "+fmtMinutes(r.durationMinutes),"연결 할 일: "+(r.taskTitleSnapshot||"독립 기록"),"막힌 부분: "+(r.blocker||""),"메모: "+(r.note||""),""));out.push("=== 완료 이력 ("+data.completionEvents.length+") ===");data.completionEvents.forEach(e=>out.push("- "+e.taskTitleSnapshot+" / 완료: "+e.at+" / 주기: "+e.cycleKey));out.push("","=== 일기 ("+(data.entries||[]).length+") ===");(data.entries||[]).forEach(e=>out.push("["+e.date+"] "+e.title,"기분: "+e.mood,"태그: "+(e.tags||[]).join(", "),"ID: "+e.id,e.content,""));downloadFile("personal-diary-all-data-"+new Date().toISOString().slice(0,10)+".txt","\uFEFF"+out.join("\n"),"text/plain;charset=utf-8");showToast("전체 자료를 TXT 파일로 저장했어요.")}
 function exportData(){const payload={app:"Personal Diary",schemaVersion:2,exportedAt:nowISO(),data:{plans:data.plans,tasks:data.tasks,runs:data.runs,completionEvents:data.completionEvents,entries:data.entries||[]}};const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="personal-diary-backup-"+new Date().toISOString().slice(0,10)+".json";a.click();URL.revokeObjectURL(url);showToast("계획·할 일·일기·실행 기록을 포함한 전체 백업을 내려받았어요.")}
 function importDataFile(file){if(!file)return;const reader=new FileReader();reader.onload=()=>{try{const parsed=JSON.parse(String(reader.result||""));const d=parsed.data||parsed;if(!d||typeof d!=="object"||!Array.isArray(d.plans)||!Array.isArray(d.tasks)||!Array.isArray(d.runs)||!Array.isArray(d.completionEvents))throw new Error("wrong schema");if(!confirm("현재 다이어리 데이터를 백업 파일의 내용으로 바꿀까요? 현재 상태를 먼저 내보내기 해두세요."))return;data=normalizeData(d);save();render();showToast("백업 데이터를 불러왔어요.")}catch(e){showToast("유효한 Personal Diary 백업 파일이 아니에요.")}};reader.readAsText(file)}
-function handleAction(el){const a=el.dataset.action,tid=el.dataset.id;if(!a)return;if(a==="sign-out"){void performSignOut()}else if(a==="new-journal")openJournalForm();else if(a==="edit-journal")openJournalForm(tid);else if(a==="delete-journal"){const entry=data.entries.find(x=>x.id===tid);if(entry&&confirm("“"+entry.title+"” 일기를 삭제할까요?")){data.entries=data.entries.filter(x=>x.id!==tid);save();render();showToast("일기를 삭제했어요.")}}else if(a==="new-plan")openPlanForm();else if(a==="edit-plan")openPlanForm(tid);else if(a==="plan-history")showPlanHistory(tid);else if(a==="review-plan-tasks"){openReviewTaskDetails(el.dataset.plan||"",el.dataset.status)}else if(a==="new-task")openTaskForm("",el.dataset.plan||"");else if(a==="edit-task")openTaskForm(tid);else if(a==="complete-task")completeTask(tid);else if(a==="reopen-task")reopenTask(tid);else if(a==="delete-task"){const t=getTask(tid);if(t&&confirm("“"+t.title+"” 할 일을 삭제할까요? 실행 기록은 남겨두고 할 일만 목록에서 삭제합니다.")){data.tasks=data.tasks.filter(x=>x.id!==tid);data.runs.forEach(r=>{if(r.taskId===tid){r.taskTitleSnapshot=r.taskTitleSnapshot||t.title;r.taskId=null}});save();render();showToast("할 일을 삭제했어요. 관련 실행 기록은 보존했어요.")}}else if(a==="new-run")openRunForm(el.dataset.task||"");else if(a==="delete-run"){if(confirm("이 실행 기록을 삭제할까요?")){data.runs=data.runs.filter(r=>r.id!==tid);save();render();showToast("실행 기록을 삭제했어요.")}}else if(a==="close-modal"){closeModal()}else if(a==="export-data")exportData();else if(a==="export-csv")exportCsv();else if(a==="export-txt")exportTxt();else if(a==="toggle-priority-picker"){const picker=el.closest("[data-priority-picker]");if(picker){const menu=picker.querySelector(".number-picker-menu"),trigger=picker.querySelector(".number-picker-trigger"),opening=menu.classList.contains("hide");document.querySelectorAll(".number-picker-menu").forEach(m=>m.classList.add("hide"));document.querySelectorAll(".number-picker-trigger").forEach(b=>b.setAttribute("aria-expanded","false"));if(opening){menu.classList.remove("hide");trigger.setAttribute("aria-expanded","true");const formValue=picker.querySelector('input[name="priority"]')?.value;const current=formValue||(priorityFilter==="all"?"":priorityFilter);const selected=current?menu.querySelector('[data-value="'+current+'"]'):null;if(selected)menu.scrollTop=Math.max(0,selected.offsetTop-2*selected.offsetHeight)}}else{} }else if(a==="set-priority-value"){const picker=el.closest("[data-priority-picker]");if(picker){const value=String(normalizePriority(el.dataset.value)),input=picker.querySelector('input[name="priority"]'),label=picker.querySelector("[data-selected-label]");if(input)input.value=value;if(label)label.textContent=value;picker.querySelector(".number-picker-menu").classList.add("hide");picker.querySelector(".number-picker-trigger").setAttribute("aria-expanded","false")}}else if(a==="set-priority-filter"){priorityFilter=el.dataset.value==="all"?"all":String(normalizePriority(el.dataset.value));render()}else if(a==="import-data")document.getElementById("importInput").click();else if(a==="cloud-upload-local")uploadLocalDiaryToCloud(false);else if(a==="cloud-pull")pullSharedDiary();else if(a==="cloud-retry")initializeCloudSync();else if(a==="cloud-retry-save")void flushCloudDiary();else if(a==="cloud-download-pre-sync-backup")downloadPreSyncLocalBackup();else if(a==="cloud-use-remote")usePendingCloudDiary();else if(a==="cloud-overwrite-remote")overwriteCloudWithLocal();else if(a==="show-storage-note")showModal("저장 방식 안내 🔒","현재 버전의 데이터 보관에 대해 알아두세요.",'<div class="hint-box">로그인한 계정별로 별도 중앙 저장 경로를 사용합니다. 같은 계정으로 로그인한 기기는 자동 동기화되고, 다른 계정은 별도 기록을 사용합니다.</div><div class="history-diff" style="margin-top:12px">기존 브라우저에 로그인 전 기록이 있다면 해당 기록이 본인 계정에 속하는지 확인한 뒤에만 가져오세요. 계정의 첫 중앙 저장소가 비어 있고 브라우저에 기존 기록이 있을 경우, 직접 업로드를 확인해야 서버로 전송됩니다. 접속할 때 중앙 기록을 불러오고, 로그아웃 또는 페이지 종료 시 변경사항 저장을 시도합니다. 페이지 종료 시 브라우저가 요청을 취소할 수 있으며, 충돌 시 자동 덮어쓰기를 막습니다. JSON 백업을 안전하게 보관하세요.</div>','확인','history')}
+function handleAction(el){const a=el.dataset.action,tid=el.dataset.id;if(!a)return;if(a==="sign-out"){void performSignOut()}else if(a==="new-journal")openJournalForm();else if(a==="edit-journal")openJournalForm(tid);else if(a==="delete-journal"){const entry=data.entries.find(x=>x.id===tid);if(entry&&confirm("“"+entry.title+"” 일기를 삭제할까요?")){data.entries=data.entries.filter(x=>x.id!==tid);save();render();showToast("일기를 삭제했어요.")}}else if(a==="new-plan")openPlanForm();else if(a==="edit-plan")openPlanForm(tid);else if(a==="plan-history")showPlanHistory(tid);else if(a==="review-plan-tasks"){openReviewTaskDetails(el.dataset.plan||"",el.dataset.status)}else if(a==="new-task")openTaskForm("",el.dataset.plan||"");else if(a==="edit-task")openTaskForm(tid);else if(a==="complete-task")completeTask(tid);else if(a==="reopen-task")reopenTask(tid);else if(a==="delete-task"){const t=getTask(tid);if(t&&confirm("“"+t.title+"” 할 일을 삭제할까요? 실행 기록은 남겨두고 할 일만 목록에서 삭제합니다.")){data.tasks=data.tasks.filter(x=>x.id!==tid);data.runs.forEach(r=>{if(r.taskId===tid){r.taskTitleSnapshot=r.taskTitleSnapshot||t.title;r.taskId=null}});save();render();showToast("할 일을 삭제했어요. 관련 실행 기록은 보존했어요.")}}else if(a==="new-run")openRunForm(el.dataset.task||"");else if(a==="delete-run"){if(confirm("이 실행 기록을 삭제할까요?")){data.runs=data.runs.filter(r=>r.id!==tid);save();render();showToast("실행 기록을 삭제했어요.")}}else if(a==="close-modal"){closeModal()}else if(a==="export-data")exportData();else if(a==="export-csv")exportCsv();else if(a==="export-txt")exportTxt();else if(a==="toggle-priority-picker"){const picker=el.closest("[data-priority-picker]");if(picker){const menu=picker.querySelector(".number-picker-menu"),trigger=picker.querySelector(".number-picker-trigger"),opening=menu.classList.contains("hide");document.querySelectorAll(".number-picker-menu").forEach(m=>m.classList.add("hide"));document.querySelectorAll(".number-picker-trigger").forEach(b=>b.setAttribute("aria-expanded","false"));if(opening){menu.classList.remove("hide");trigger.setAttribute("aria-expanded","true");const formValue=picker.querySelector('input[name="priority"]')?.value;const current=formValue||(priorityFilter==="all"?"":priorityFilter);const selected=current?menu.querySelector('[data-value="'+current+'"]'):null;if(selected)menu.scrollTop=Math.max(0,selected.offsetTop-2*selected.offsetHeight)}}else{} }else if(a==="set-priority-value"){const picker=el.closest("[data-priority-picker]");if(picker){const value=String(normalizePriority(el.dataset.value)),input=picker.querySelector('input[name="priority"]'),label=picker.querySelector("[data-selected-label]");if(input)input.value=value;if(label)label.textContent=value;picker.querySelector(".number-picker-menu").classList.add("hide");picker.querySelector(".number-picker-trigger").setAttribute("aria-expanded","false")}}else if(a==="set-priority-filter"){priorityFilter=el.dataset.value==="all"?"all":String(normalizePriority(el.dataset.value));render()}else if(a==="import-data")document.getElementById("importInput").click();else if(a==="cloud-upload-local")uploadLocalDiaryToCloud(false);else if(a==="cloud-import-blob")importLegacyBlobDiary();else if(a==="cloud-pull")pullSharedDiary();else if(a==="cloud-retry")initializeCloudSync();else if(a==="cloud-retry-save")void flushCloudDiary();else if(a==="cloud-download-pre-sync-backup")downloadPreSyncLocalBackup();else if(a==="cloud-use-remote")usePendingCloudDiary();else if(a==="cloud-overwrite-remote")overwriteCloudWithLocal();else if(a==="show-storage-note")showModal("저장 방식 안내 🔒","현재 버전의 데이터 보관에 대해 알아두세요.",'<div class="hint-box">로그인한 계정별로 별도 중앙 저장 경로를 사용합니다. 같은 계정으로 로그인한 기기는 자동 동기화되고, 다른 계정은 별도 기록을 사용합니다.</div><div class="history-diff" style="margin-top:12px">기존 브라우저에 로그인 전 기록이 있다면 해당 기록이 본인 계정에 속하는지 확인한 뒤에만 가져오세요. 계정의 첫 중앙 저장소가 비어 있고 브라우저에 기존 기록이 있을 경우, 직접 업로드를 확인해야 서버로 전송됩니다. 접속할 때 중앙 기록을 불러오고, 로그아웃 또는 페이지 종료 시 변경사항 저장을 시도합니다. 페이지 종료 시 브라우저가 요청을 취소할 수 있으며, 충돌 시 자동 덮어쓰기를 막습니다. JSON 백업을 안전하게 보관하세요.</div>','확인','history')}
 document.addEventListener("click",e=>{const nav=e.target.closest("[data-page]");if(nav){navigateToPage(nav.dataset.page);return}const action=e.target.closest("[data-action]");if(action){if(action.dataset.action==="close-modal"&&action.classList.contains("modal-backdrop")&&e.target!==action)return;handleAction(action)}});
 window.addEventListener("popstate",e=>{
   const s=e.state||{};
@@ -840,16 +809,10 @@ async function handleAuthSession(session){
     showAuthGate();
     return;
   }
-  clearTimeout(cloudSaveTimer);
-  cloudSaveTimer=null;
-  cloudPendingRemote=null;
-  cloudSaveInFlight=false;
-  cloudState="disabled";
-  cloudUpdatedAt=null;
-  cloudBlobEtag=null;
-  cloudDirty=false;
-  cloudExitFlushStarted=false;
-  cloudStatusMessage="로그인 후 계정별 중앙 저장소에 연결합니다.";
+  stopDiaryRealtime();
+  if(cloudSaveTimer){clearTimeout(cloudSaveTimer);cloudSaveTimer=null;}
+  cloudPendingRemote=null;cloudSaveInFlight=false;cloudState="disabled";cloudUpdatedAt=null;cloudRevision=null;cloudDirty=false;cloudExitFlushStarted=false;cloudQueuedRevision=0;
+  cloudStatusMessage="로그인 후 Supabase DB에 연결합니다.";
   activeUser=nextUser;
   if(!activeUser){
     data=blank();
@@ -885,7 +848,9 @@ async function handleAuthSession(session){
   document.getElementById("signedInEmail").textContent=activeUser.email||"로그인됨";
   setPage("home");
   updateCloudPanel();
+  await startDiaryRealtime(activeUser.id);
   await initializeCloudSync();
+  if(cloudQueuedRevision>Number(cloudRevision||0))void handleDiaryBroadcast(cloudQueuedRevision);
 }
 async function performSignOut(){
   if(!authClient)return;
@@ -944,7 +909,12 @@ async function initializeSupabaseAuth(){
     return;
   }
   authClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_PUBLISHABLE_KEY);
-  authClient.auth.onAuthStateChange((_event,session)=>{void handleAuthSession(session)});
+  authClient.auth.onAuthStateChange((_event,session)=>{
+    Promise.resolve().then(async()=>{
+      if(session&&session.access_token)authClient.realtime.setAuth(session.access_token);
+      await handleAuthSession(session);
+    }).catch(error=>console.warn("Auth state handler failed:",error&&error.message?error.message:error));
+  });
   try{
     const {data:result,error}=await authClient.auth.getSession();
     if(error)throw error;
