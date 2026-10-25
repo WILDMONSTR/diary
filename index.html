@@ -1017,9 +1017,9 @@ async function changePasswordFromForm(values){
       showToast("비밀번호는 변경됐지만 모든 세션을 종료했는지 확인할 수 없습니다. 다시 로그인하고 이전 세션을 점검하세요.");
       return;
     }
-    showAuthGate("비밀번호를 변경했고 기존 로그인 세션을 종료했습니다. 새 비밀번호로 다시 로그인하세요.",false);
     setAuthMode("signin");
     clearAuthInputs();
+    showAuthGate("비밀번호를 변경했고 기존 로그인 세션을 종료했습니다. 새 비밀번호로 다시 로그인하세요.",false);
   }catch(error){
     showToast("비밀번호를 변경하지 못했습니다: "+(error&&error.message?error.message:"인증 오류"));
     if(submit){submit.disabled=false;submit.textContent="비밀번호 변경";}
