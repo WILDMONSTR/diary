@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { get, list, put } from "@vercel/blob";
 
 const USER_STORE_PREFIX = "mellow-diary/users/";
+const LEGACY_SHARED_STORE_PATH = "mellow-diary/shared-data-v1.json";
 const MAX_BYTES = 1024 * 1024;
 const MAX_RECORDS_PER_COLLECTION = 5000;
 const USER_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -138,6 +139,31 @@ function cleanData(input) {
   return data;
 }
 
+async function readLegacySharedDiary() {
+  const { blobs = [] } = await list({ prefix: LEGACY_SHARED_STORE_PATH, limit: 1 });
+  const blob = blobs.find((item) => item.pathname === LEGACY_SHARED_STORE_PATH);
+  if (!blob) return { exists: false, data: null, updatedAt: null };
+
+  let downloaded;
+  try {
+    downloaded = await get(blob.url, { access: "public", useCache: false });
+  } catch (publicReadError) {
+    // Compatibility fallback for a store whose old file was private.
+    downloaded = await get(blob.url, { access: "private", useCache: false });
+  }
+  if (!downloaded) return { exists: false, data: null, updatedAt: null };
+
+  const rawText = await new Response(downloaded.stream).text();
+  const record = JSON.parse(rawText);
+  const data = cleanData(record.data ?? record);
+  return {
+    exists: true,
+    data,
+    updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : null,
+    legacySharedFile: true,
+  };
+}
+
 async function readUserDiary(pathname, user) {
   const metadata = user?.user_metadata || {};
   const hadStoredPointer = Boolean(metadata[BLOB_POINTER_URL_KEY] || metadata[BLOB_POINTER_SIGNATURE_KEY]);
@@ -212,14 +238,22 @@ export default async function handler(req, res) {
   const pathname = userStorePath(user.id);
 
   if (req.method === "GET") {
+    const url = new URL(req.url || "/", "https://diary.local");
+    const isLegacyImport = req.query?.legacyImport === "1" || url.searchParams.get("legacyImport") === "1";
     try {
-      const result = await readUserDiary(pathname, user);
+      // Used only by the user's explicit, confirmed one-time import action.
+      // Ordinary diary reads/writes use Supabase DB and never touch Blob.
+      const result = isLegacyImport
+        ? await readLegacySharedDiary()
+        : await readUserDiary(pathname, user);
       return send(res, 200, { ok: true, ...result });
     } catch (error) {
-      console.error("User diary cloud read failed:", error?.message || error);
+      console.error(isLegacyImport ? "Legacy shared diary import read failed:" : "User diary cloud read failed:", error?.message || error);
       return send(res, 503, {
         ok: false,
-        error: "이 계정의 다이어리를 읽지 못했습니다. Blob 연결과 배포 설정을 확인해 주세요.",
+        error: isLegacyImport
+          ? "이전 공유 Blob 기록을 읽지 못했습니다. 저장소의 사용 한도나 연결 설정을 확인해 주세요."
+          : "이 계정의 다이어리를 읽지 못했습니다. Blob 연결과 배포 설정을 확인해 주세요.",
       });
     }
   }
