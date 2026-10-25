@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { get, list, put } from "@vercel/blob";
 
 const USER_STORE_PREFIX = "mellow-diary/users/";
@@ -74,6 +75,34 @@ function userStorePath(userId) {
   return USER_STORE_PREFIX + userId.toLowerCase() + "/diary-data-v1.json";
 }
 
+const BLOB_POINTER_URL_KEY = "personal_diary_blob_url";
+const BLOB_POINTER_SIGNATURE_KEY = "personal_diary_blob_signature";
+
+function signBlobPointer(userId, blobUrl) {
+  const secret = String(process.env.BLOB_READ_WRITE_TOKEN || "");
+  if (!secret || typeof blobUrl !== "string" || !blobUrl) return null;
+  return createHmac("sha256", secret).update(userId + "\n" + blobUrl, "utf8").digest("hex");
+}
+
+function getVerifiedBlobPointer(user) {
+  const metadata = user?.user_metadata || {};
+  const blobUrl = metadata[BLOB_POINTER_URL_KEY];
+  const signature = metadata[BLOB_POINTER_SIGNATURE_KEY];
+  if (typeof blobUrl !== "string" || !blobUrl.startsWith("https://") ||
+      typeof signature !== "string" || !/^[0-9a-f]{64}$/i.test(signature)) return null;
+
+  const expected = signBlobPointer(user.id, blobUrl);
+  if (!expected || expected.length !== signature.length) return null;
+  return timingSafeEqual(Buffer.from(expected, "utf8"), Buffer.from(signature, "utf8")) ? blobUrl : null;
+}
+
+function blobPointerPayload(userId, blobUrl) {
+  return {
+    blobUrl: blobUrl || null,
+    blobSignature: blobUrl ? signBlobPointer(userId, blobUrl) : null,
+  };
+}
+
 function cleanData(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("data must be an object");
@@ -109,22 +138,55 @@ function cleanData(input) {
   return data;
 }
 
-async function readUserDiary(pathname) {
-  const { blobs = [] } = await list({ prefix: pathname, limit: 1 });
-  const blob = blobs.find((item) => item.pathname === pathname);
-  if (!blob) return { exists: false, data: null, updatedAt: null };
+async function readUserDiary(pathname, user) {
+  const metadata = user?.user_metadata || {};
+  const hadStoredPointer = Boolean(metadata[BLOB_POINTER_URL_KEY] || metadata[BLOB_POINTER_SIGNATURE_KEY]);
+  let blobUrl = getVerifiedBlobPointer(user);
+  let blob = null;
+  let downloaded = null;
 
-  const downloaded = await get(blob.url, { access: "private" });
+  // A signed pointer is bound to this verified Supabase user ID.
+  // Once stored, this reads the private Blob directly without calling list().
+  if (blobUrl) {
+    try {
+      const candidate = await get(blobUrl, { access: "private" });
+      if (candidate && candidate.blob && candidate.blob.pathname === pathname) {
+        downloaded = candidate;
+        blob = candidate.blob;
+      }
+    } catch (error) {
+      console.warn("Saved Blob pointer could not be read; falling back to exact-path lookup.");
+    }
+  }
+
+  // Only the initial lookup or a stale pointer needs the Advanced Operation list().
+  if (!downloaded) {
+    const { blobs = [] } = await list({ prefix: pathname, limit: 1 });
+    blob = blobs.find((item) => item.pathname === pathname);
+    if (!blob) {
+      return {
+        exists: false,
+        data: null,
+        updatedAt: null,
+        ...(hadStoredPointer ? { clearBlobPointer: true } : {}),
+      };
+    }
+    blobUrl = blob.url;
+    downloaded = await get(blobUrl, { access: "private" });
+  }
+
   if (!downloaded) return { exists: false, data: null, updatedAt: null };
 
   const rawText = await new Response(downloaded.stream).text();
   const record = JSON.parse(rawText);
   const data = cleanData(record.data ?? record);
+  const resolvedUrl = blobUrl || blob?.url || downloaded.blob?.url;
   return {
     exists: true,
     data,
     updatedAt: typeof record.updatedAt === "string" ? record.updatedAt : null,
-    etag: blob.etag || downloaded.etag || null,
+    etag: blob?.etag || downloaded.blob?.etag || null,
+    ...blobPointerPayload(user.id, resolvedUrl),
   };
 }
 
@@ -151,7 +213,7 @@ export default async function handler(req, res) {
 
   if (req.method === "GET") {
     try {
-      const result = await readUserDiary(pathname);
+      const result = await readUserDiary(pathname, user);
       return send(res, 200, { ok: true, ...result });
     } catch (error) {
       console.error("User diary cloud read failed:", error?.message || error);
@@ -187,6 +249,7 @@ export default async function handler(req, res) {
       exists: true,
       updatedAt,
       etag: savedBlob?.etag || null,
+      ...blobPointerPayload(user.id, savedBlob?.url),
     });
   } catch (error) {
     const message = String(error?.message || "");
