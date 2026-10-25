@@ -259,11 +259,38 @@ async function getCurrentAccessToken(){
   if(!token)throw new Error("로그인 세션이 만료되었습니다. 다시 로그인해 주세요.");
   return token;
 }
+async function persistCloudBlobPointer(result){
+  if(!authClient||!activeUser||!result)return;
+  const metadata=activeUser.user_metadata||{};
+  const hasPointer=Boolean(metadata.personal_diary_blob_url||metadata.personal_diary_blob_signature);
+  let nextMetadata=null;
+  if(result.blobUrl&&result.blobSignature){
+    if(metadata.personal_diary_blob_url===result.blobUrl&&metadata.personal_diary_blob_signature===result.blobSignature)return;
+    nextMetadata={
+      personal_diary_blob_url:result.blobUrl,
+      personal_diary_blob_signature:result.blobSignature
+    };
+  }else if(result.clearBlobPointer&&hasPointer){
+    nextMetadata={personal_diary_blob_url:null,personal_diary_blob_signature:null};
+  }
+  if(!nextMetadata)return;
+  try{
+    const {data,error}=await authClient.auth.updateUser({data:nextMetadata});
+    if(error){
+      console.warn("Could not cache the signed diary Blob pointer in account metadata:",error.message||error);
+      return;
+    }
+    if(data&&data.user&&data.user.id===activeUser.id)activeUser=data.user;
+  }catch(error){
+    console.warn("Could not cache the signed diary Blob pointer in account metadata:",error&&error.message?error.message:error);
+  }
+}
 async function requestSharedDiary(){
   const token=await getCurrentAccessToken();
   const response=await fetch("/api/diary?ts="+Date.now(),{method:"GET",cache:"no-store",headers:{"Accept":"application/json","Authorization":"Bearer "+token}});
   const result=await response.json().catch(()=>({}));
   if(!response.ok||!result.ok)throw new Error(result.error||("HTTP "+response.status));
+  await persistCloudBlobPointer(result);
   return result;
 }
 async function writeSharedDiary(candidate,expectedEtag){
@@ -275,6 +302,7 @@ async function writeSharedDiary(candidate,expectedEtag){
     error.status=response.status;
     throw error;
   }
+  await persistCloudBlobPointer(result);
   return result;
 }
 
