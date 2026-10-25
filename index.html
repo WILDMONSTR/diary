@@ -296,7 +296,7 @@ async function requestLegacyBlobDiary(){
 }
 async function importLegacyBlobDiary(){
   if(cloudState!=="empty"){showToast("DB가 비어 있을 때만 이전 Blob 기록을 가져올 수 있습니다.");return}
-  if(!confirm("이전 Vercel Blob의 내 계정 기록을 읽어 Supabase DB로 복사합니다. Blob 원본 파일은 삭제하지 않습니다. 계속할까요?"))return;
+  if(!confirm("주의: 이전 no-login 버전의 '공유 Blob 파일'을 읽습니다. 이 파일에는 이 브라우저뿐 아니라 예전 사이트에서 기록한 다른 방문자의 데이터도 섞여 있을 수 있습니다. 본인 소유의 기록만 포함됐다고 확인한 경우에만 진행하세요. 원본 Blob 파일은 삭제하지 않습니다. 계속할까요?"))return;
   try{
     const current=await requestSharedDiary();
     if(current.exists){showToast("이미 DB에 기록이 생겼습니다. Blob 가져오기를 중지했습니다.");await initializeCloudSync();return}
