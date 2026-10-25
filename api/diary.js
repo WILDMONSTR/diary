@@ -240,20 +240,25 @@ export default async function handler(req, res) {
   if (req.method === "GET") {
     const url = new URL(req.url || "/", "https://diary.local");
     const isLegacyImport = req.query?.legacyImport === "1" || url.searchParams.get("legacyImport") === "1";
+    // The old no-login shared Blob can contain records belonging to other visitors.
+    // A confirmation dialog is not an authorization boundary, so this public endpoint
+    // must never return that shared file to arbitrary signed-in accounts.
+    if (isLegacyImport) {
+      return send(res, 410, {
+        ok: false,
+        error: "이전 공유 기록 가져오기는 보안상 비활성화되었습니다. 본인 소유의 JSON 백업 파일을 사용해 주세요.",
+      });
+    }
     try {
-      // Used only by the user's explicit, confirmed one-time import action.
-      // Ordinary diary reads/writes use Supabase DB and never touch Blob.
-      const result = isLegacyImport
-        ? await readLegacySharedDiary()
-        : await readUserDiary(pathname, user);
+      // Normal reads/writes use a per-user private Blob path only; the live app's
+      // normal diary synchronization is handled by Supabase DB.
+      const result = await readUserDiary(pathname, user);
       return send(res, 200, { ok: true, ...result });
     } catch (error) {
-      console.error(isLegacyImport ? "Legacy shared diary import read failed:" : "User diary cloud read failed:", error?.message || error);
+      console.error("User diary cloud read failed:", error?.message || error);
       return send(res, 503, {
         ok: false,
-        error: isLegacyImport
-          ? "이전 공유 Blob 기록을 읽지 못했습니다. 저장소의 사용 한도나 연결 설정을 확인해 주세요."
-          : "이 계정의 다이어리를 읽지 못했습니다. Blob 연결과 배포 설정을 확인해 주세요.",
+        error: "이 계정의 다이어리를 읽지 못했습니다. Blob 연결과 배포 설정을 확인해 주세요.",
       });
     }
   }
