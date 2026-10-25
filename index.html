@@ -983,7 +983,7 @@ function renderSessionCountdown(){
   el.textContent=remaining>0?("남은 세션 "+mm+":"+ss+" · 만료 "+expiresAt):"세션 만료 중…";
   if(remaining<=0&&!sessionExpiryPending){sessionExpiryPending=true;void performSignOut({expired:true});}
 }
-async async function startSessionCountdown(){
+async function startSessionCountdown(){
   clearSessionCountdown();
   if(!authClient||!activeUser)return false;
   try{
